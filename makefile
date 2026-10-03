@@ -112,10 +112,23 @@ $(DEMO_IMG_GZ): $(IMG)
 
 webimg: $(DEMO_IMG_GZ)
 
+# ---------------------------------------------------------------- 文件系统宿主测试
+# 这里使用 Linux libc 做镜像读取, 不使用裸机的 -m32 编译选项。
+FS_TEST = $(BUILD_DIR)/tests/fs_test
+$(FS_TEST): tests/fs_test.c lib/src/fs.c lib/src/mem.c lib/src/string.c \
+    lib/include/fs.h lib/include/mem.h lib/include/string.h \
+    lib/include/stdint.h lib/include/dev/blockdev.h
+	@mkdir -p $(@D)
+	gcc -std=gnu11 -fno-builtin -Wall -Wextra -Ilib/include \
+	    tests/fs_test.c lib/src/fs.c lib/src/mem.c lib/src/string.c -o $@
+
+test-fs: $(IMG) $(FS_TEST)
+	$(FS_TEST) $(IMG)
+
 clean:
 	rm -f $(IMG) $(DEMO_IMG_GZ)
 	rm -rf $(BUILD_DIR) $(BIN_DIR) $(FSROOT)
 
-.PHONY: all resetimg run clean fsroot webimg
+.PHONY: all resetimg run clean fsroot webimg test-fs
 
 -include $(shell find $(BUILD_DIR) -name '*.d' 2>/dev/null)

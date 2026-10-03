@@ -2,7 +2,7 @@
 #include "abi.h"
 #include "ctx.h"
 #include "eth_tmp.h"
-#include "fs.h"
+#include "fs_monitor.h"
 
 // headers from common libraries
 #include "convert.h"
@@ -10,6 +10,7 @@
 #include "dev/blockdev.h"
 
 PVOID *lw_abi_base;
+static FS_VOLUME monitor_fs;
 
 /* ABI 不可用时连 puts 都没有, 只能直接写显存 */
 static void no_abi_halt(void) {
@@ -151,7 +152,7 @@ static void execute(const char* str) {
             break;
         }
         case 'f': {
-            if (fs_init() < 0)
+            if (fs_init(&monitor_fs) < 0)
                 lw_puts("FILESYSTEM INIT FAILED\n\r");
             break;
         }
@@ -334,7 +335,13 @@ static void execute(const char* str) {
         }
         case '.': { // new function test
             DWORD tmp;
-            resolve_path("/res/readme.txt\0", &tmp);
+            if (resolve_path(&monitor_fs, "/res/readme.txt", &tmp) == 0) {
+                lw_puts("FOUND AT ");
+                lw_put_dword(tmp);
+                lw_puts("\n\r");
+            } else {
+                lw_puts("PATH RESOLVE FAILED\n\r");
+            }
             break;
         }
     }
