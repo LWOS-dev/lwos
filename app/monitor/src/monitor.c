@@ -5,6 +5,7 @@
 #include "fs_monitor.h"
 
 // headers from common libraries
+#include "mem.h"
 #include "convert.h"
 #include "string.h"
 #include "dev/blockdev.h"
@@ -39,7 +40,7 @@ static void prompt_read() {
     for (;;) {
         char c = lw_getc();
         if (c=='\n') { line[n]=0; lw_puts("\n\r"); return; }
-        if (c=='\b') { if (n>0) { n--; lw_putc('\b'); } continue; }
+        if (c=='\b') { if (n>0) { n--; lw_puts("\b \b"); } continue; }
         if (c<' '||c>'~'||n>=(int)sizeof(line)-1)
             continue;
         line[n++]=c;
@@ -52,10 +53,14 @@ extern void pci_detail(BYTE bus,BYTE dev,BYTE fn);
 extern int pci_find_class(BYTE cls, BYTE sub, PBYTE bus, PBYTE dev, PBYTE fn);
 
 void help() {
-    lw_puts("br/bw    [dev] [addr]   Block device operation\n\r");
+    lw_puts("cb/s                    Clear buffer/screen\n\r");
+    lw_puts("tb                      Type down buffer\n\r");
+    lw_puts("sb                      Show buffer\n\r");
+    lw_puts("br/bw    [devidx] [lba] Block device operation\n\r");
     lw_puts("         [addr] [count]\n\r");
     lw_puts("d        [addr]         Dump 128 bytes(PBYTE)\n\r");
     lw_puts("ob/ow/ol [addr] [value] Write to Memory\n\r");
+    lw_puts("m                       List memory entry table\n\r");
     lw_puts("ib/iw/il [addr]         Read from Memory\n\r");
     lw_puts("n(r)                    Network debuging (single supported NIC)\n\r");
     lw_puts("p        <b> <d> <f>    PCI information\n\r");
@@ -73,6 +78,7 @@ static void display_banner(void) {
     lw_puts("                                      \\|_________|\n\r");
     lw_puts("\n   LWOS MT v2 - New Technology Operating System\n\n\r");
 }
+static char var_path[256];
 static void execute(const char* str) {
     char c0;
     char c1;
@@ -88,6 +94,53 @@ static void execute(const char* str) {
             *str++:0;
 
     switch (c0) {
+        case 'm': {
+            mmap_init();
+            mmap_dump();
+            break;
+        }
+        case 'c': {
+            switch (c1) {
+                case 's': {
+                    lw_screen_clear();
+                    break;
+                }
+                case 'b': {
+                    memzero(var_path, 256);
+                    break;
+                }
+            }
+            break;
+        }
+        case 's': {
+            switch (c1) {
+                case 'b': {
+                    lw_puts(var_path);
+                    lw_puts("\n\r");
+                    break;
+                }
+            }
+            break;
+        }
+        case 't': {
+            switch (c1) {
+                case 'b': {
+                    memzero(var_path, 256);
+                    int n=0;
+                    for (;;) {
+                        char c=lw_getc();
+                        if (c=='\n') { var_path[n]=0; lw_puts("\n\r"); break; }
+                        if (c=='\b') { if (n>0) { n--; lw_puts("\b \b"); } continue; }
+                        if (c<' '||c>'~'||n>=(int)sizeof(var_path)-1)
+                            continue;
+                        var_path[n++]=c;
+                        lw_putc(c);
+                    }
+                    break;
+                }
+            }
+            break;
+        }
         case 'a': {
             switch (c1) {
                 case 'p': {
@@ -152,8 +205,21 @@ static void execute(const char* str) {
             break;
         }
         case 'f': {
-            if (fs_init(&monitor_fs) < 0)
-                lw_puts("FILESYSTEM INIT FAILED\n\r");
+            switch (c1) {
+                case 'i': {
+                    if (fs_init(&monitor_fs) < 0)
+                        lw_puts("FILESYSTEM INIT FAILED\n\r");
+                    break;
+                }
+                case 'l': {
+                    if (!hex_parse(&str, &a)) {
+                        lw_puts("DIR CLUSTER IS REQUIRED\n\r");
+                        return;
+                    }
+                    dir_list(&monitor_fs, a);
+                    break;
+                }
+            }
             break;
         }
         case 'd': {
@@ -335,7 +401,7 @@ static void execute(const char* str) {
         }
         case '.': { // new function test
             DWORD tmp;
-            if (resolve_path(&monitor_fs, "/res/readme.txt", &tmp) == 0) {
+            if (resolve_path(&monitor_fs, var_path, &tmp) == 0) {
                 lw_puts("FOUND AT ");
                 lw_put_dword(tmp);
                 lw_puts("\n\r");

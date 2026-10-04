@@ -2,7 +2,7 @@
 
 LOADER_ELF	= $(BIN_DIR)/loader.elf
 LOADER_BIN	= $(BIN_DIR)/loader.bin
-LOADER_OBJS	= $(BUILD_DIR)/loader/loader.o
+LOADER_OBJS	= $(BUILD_DIR)/loader/loader.o $(BUILD_DIR)/loader/bootdisk.o
 
 $(BUILD_DIR)/loader/%.o: loader/%.c
 	@mkdir -p $(@D)

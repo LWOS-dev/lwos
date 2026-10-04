@@ -12,6 +12,7 @@ typedef unsigned long* uint64_p;
 typedef void* uint0_p;
 
 #include "abi.h"
+#include "bootdisk.h"
 
 #define NULL (0)
 
@@ -31,23 +32,7 @@ static inline void outb(uint16_t port, uint8_t val) {
     __asm__ volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
 }
 
-static inline uint16_t inw(uint16_t port) {
-    uint16_t val;
-    __asm__ volatile ("inw %1, %0" : "=a"(val) : "Nd"(port));
-    return val;
-}
-static inline void outw(uint16_t port, uint16_t val) {
-    __asm__ volatile ("outw %0, %1" : : "a"(val), "Nd"(port));
-}
 
-static inline uint32_t inl(uint16_t port) {
-    uint32_t val;
-    __asm__ volatile ("inl %1, %0" : "=a"(val) : "Nd"(port));
-    return val;
-}
-static inline void outl(uint16_t port, uint32_t val) {
-    __asm__ volatile ("outl %0, %1" : : "a"(val), "Nd"(port));
-}
 
 static const char _hex[]="0123456789ABCDEF";
 
@@ -249,25 +234,18 @@ char *strcpy(char *dest, const char *src) {
     return ret;
 }
 
-#define ATA_BASE 0x1F0
-#define ATA_BSY  0x80
-#define ATA_DRQ  0x08
-
-void ata_read(uint32_t lba, uint8_t count, uint16_t *buf) {
-    while (inb(ATA_BASE+7) & ATA_BSY);
-
-    // 1110 + 0xf000000
-    outb(ATA_BASE+6, 0xe0 | ((lba >> 24) & 0xf));
-    outb(ATA_BASE+2, count); // sectors
-    outb(ATA_BASE+3, lba & 0xff); // 0x00000ff
-    outb(ATA_BASE+4, (lba >> 8) & 0xff); // 0x000ff00
-    outb(ATA_BASE+5, (lba >> 16) & 0xff); // 0x0ff0000
-    outb(ATA_BASE+7, 0x20); // read
-
-    for (int s = 0; s < count; s++) {
-        while (!(inb(ATA_BASE+7) & ATA_DRQ));
-        for (int i = 0; i < 256; i++)
-            buf[s*256 + i] = inw(ATA_BASE);
+/* 启动期磁盘读取由 stage2 的 BIOS 跳板完成, 不再访问 IDE 端口。 */
+static void disk_read_checked(QWORD lba, DWORD count, PVOID destination) {
+    int status = boot_disk_read(lba, count, destination);
+    if (status == 0)
+        return;
+    puts("BIOS DISK READ FAILED, LBA ");
+    put_dword((uint32_t)lba);
+    puts(" STATUS ");
+    put_dword((uint32_t)status);
+    puts("\n\r");
+    for (;;) {
+        __asm__ volatile ("cli; hlt");
     }
 }
 
@@ -296,8 +274,8 @@ int part_entry = 0;
 
 int fat_init() {
     memzero(fat_buf, 512);
-    // assumpted to use ata
-    ata_read(0, 1, (uint16_p)fat_buf);
+    // BIOS 使用 stage2 保存的启动盘号
+    disk_read_checked(0, 1, (uint16_p)fat_buf);
 
     memcpy(mbrpte, fat_buf+0x1be, 16*4);
 
@@ -325,7 +303,7 @@ int fat_init() {
     }
 
     done:
-    ata_read(mbrpte[part_entry].lba, 1, (uint16_p)fat_buf);
+    disk_read_checked(mbrpte[part_entry].lba, 1, (uint16_p)fat_buf);
 
     if (*(uint16_p)(fat_buf+0x1fe) != 0xaa55) {
         puts("BAD PARITION\r\n");
@@ -353,7 +331,7 @@ int fat_init() {
     put_dword(root_cluster);
     puts("\r\n");
 
-    ata_read(cluster_to_lba(root_cluster), 1, (uint16_p)fat_buf);
+    disk_read_checked(cluster_to_lba(root_cluster), 1, (uint16_p)fat_buf);
 
     return 0;
 }
@@ -367,7 +345,7 @@ typedef struct {
 
 int fat_read_fte(int index, SFTE* p) {
     char display_name[12];
-    ata_read(cluster_to_lba(root_cluster+index/16), 1, (uint16_p)fat_buf);
+    disk_read_checked(cluster_to_lba(root_cluster+index/16), 1, (uint16_p)fat_buf);
 
     memcpy(p->name, fat_buf+(index%16)*32+0, 11);
     p->attr = *(uint8_p)(fat_buf+(index % 16)*32+0x11);
@@ -394,7 +372,7 @@ int fat_read_fte(int index, SFTE* p) {
 void search_file(const char* name, uint32_p cluster, uint32_p size) {
     int idx=0;
     SFTE e;
-    memzero(&e, 0x20);
+    memzero(&e, sizeof(e));
     char fixed_name[12];
     char resc_fixed[12];
     memcpy(fixed_name, (uint8_p)name, 11);
@@ -414,7 +392,7 @@ void search_file(const char* name, uint32_p cluster, uint32_p size) {
 }
 
 uint32_t next_cluster(uint32_t cluster) {
-    ata_read(mbrpte[part_entry].lba+reserved_sector+cluster/128, 1, (uint16_p)fat_buf);
+    disk_read_checked(mbrpte[part_entry].lba+reserved_sector+cluster/128, 1, (uint16_p)fat_buf);
 
     uint32_t res = ((uint32_p)fat_buf)[cluster%128] & 0x0fffffff;
 
@@ -430,7 +408,7 @@ void load_cluster_to_memory(void* dst, uint32_t cluster) {
     uint16_p p = dst;
     uint32_t cur_cluster = cluster;
     do {
-        ata_read(cluster_to_lba(cur_cluster), 1, p);
+        disk_read_checked(cluster_to_lba(cur_cluster), 1, p);
         p+=256;
         cur_cluster = next_cluster(cur_cluster);
     } while (cur_cluster <= 0x0fffffef);
@@ -569,7 +547,7 @@ uint32_t execute(const char* str) {
             break;
         }
         case 'C':case 'c': {
-            ata_read(mbrpte[part_entry].lba+reserved_sector+address/128, 1, (uint16_p)fat_buf);
+            disk_read_checked(mbrpte[part_entry].lba+reserved_sector+address/128, 1, (uint16_p)fat_buf);
 
             for (int i = 0; i < 16; i++) {
                 for (int j = 0; j < 8; j++) {
@@ -659,10 +637,17 @@ void loader_main(void) {
 
     screen_clear();
     puts("FILESYSTEM INITIALIZE ...\n\r");
-    fat_init();
+    if (fat_init() != 0) {
+        puts("FILESYSTEM INIT FAILED\n\r");
+        for (;;) __asm__ volatile ("cli; hlt");
+    }
 
     puts("LOADING BOOT.INI ...\n\r");
     search_file("BOOT    INI", &bootini_c, &lr_size);
+    if (!bootini_c || lr_size > 0x400u) {
+        puts("BOOT.INI MISSING OR TOO LARGE\n\r");
+        for (;;) __asm__ volatile ("cli; hlt");
+    }
     load_cluster_to_memory((uint0_p)0x500, bootini_c);
 
     do {

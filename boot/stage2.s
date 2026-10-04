@@ -47,6 +47,11 @@ stage2_entry:
     mov ss, ax
     mov sp, 0x900
     mov [BOOT_DRIVE], dl
+    ; BIOS 磁盘调用期间恢复启动时的 IRQ 屏蔽状态。
+    in al, 0x21
+    mov [TB_BIOS_PIC], al
+    in al, 0xa1
+    mov [TB_BIOS_PIC+1], al
 
     call loader_load
     call a20_enable
@@ -725,6 +730,9 @@ TB_DI           equ TRAMP_REGS + 0x0A
 TB_BP           equ TRAMP_REGS + 0x0C
 TB_FLAGS        equ TRAMP_REGS + 0x0E
 TB_VEC          equ TRAMP_BLK + 0x28    ; dword, &tramp_int10 for ABI.BIN to call
+TB_KIND         equ TRAMP_BLK + 0x2C    ; byte: 0 video, 1 boot disk
+TB_DISK_VEC     equ TRAMP_BLK + 0x30    ; dword, &tramp_disk_read for loader
+TB_BIOS_PIC     equ TRAMP_BLK + 0x34    ; 2 bytes, original BIOS IRQ masks
 
 TRAMP_STACK_TOP equ 0xc000
 
@@ -739,6 +747,7 @@ pm_entry:
     mov esp, 0xa0000
 
     mov dword [TB_VEC], tramp_int10
+    mov dword [TB_DISK_VEC], tramp_disk_read
 
     jmp 0x10000
 
@@ -748,6 +757,19 @@ tramp_int10:
     pushfd
     pushad
     cli
+    mov byte [TB_KIND], 0
+    jmp tramp_enter
+
+; 固定调用 INT 13h/AH=42h: loader 填好 0x90F0 的 DAP。
+; 仅供启动阶段使用, 原生驱动接管磁盘/PIC 后不能再调用。
+global tramp_disk_read
+tramp_disk_read:
+    pushfd
+    pushad
+    cli
+    mov byte [TB_KIND], 1
+
+tramp_enter:
 
     sgdt [TB_GDTR]
     sidt [TB_IDTR]
@@ -789,6 +811,9 @@ tramp_int10:
     mov ss, ax
     mov sp, TRAMP_STACK_TOP
 
+    cmp byte [TB_KIND], 1
+    je .disk
+
     mov ax, [TB_ES]
     push ax
     mov ax, [TB_AX]
@@ -800,6 +825,26 @@ tramp_int10:
     pop es
 
     int 0x10
+    jmp .save_flags
+
+.disk:
+    ; INT 13h 可能等待硬件 IRQ, 不沿用视频调用的全屏蔽状态。
+    mov al, [TB_BIOS_PIC]
+    out 0x21, al
+    mov al, [TB_BIOS_PIC+1]
+    out 0xa1, al
+    mov si, dap_buffer             ; DS=0, DS:SI 指向 DAP
+    mov dl, [BOOT_DRIVE]           ; BIOS 启动盘号, 不假定为 80h
+    mov ax, 0x4200
+    cld
+    sti
+    int 0x13
+
+.save_flags:
+    ; 必须在任何会修改 CF 的指令前保存 BIOS 返回状态。
+    pushf
+    pop word [cs:TB_FLAGS]
+    cli
 
     mov [cs:TB_AX], ax
     mov [cs:TB_CX], cx
@@ -807,9 +852,6 @@ tramp_int10:
     mov [cs:TB_BX], bx
     mov [cs:TB_DI], di
     mov [cs:TB_BP], bp
-    pushf
-    pop ax
-    mov [cs:TB_FLAGS], ax
     mov ax, es
     mov [cs:TB_ES], ax
 

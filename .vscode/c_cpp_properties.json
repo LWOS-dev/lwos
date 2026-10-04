@@ -3,15 +3,17 @@
         {
             "name": "Linux",
             "includePath": [
-                "${workspaceFolder}/**",
                 "${workspaceFolder}/lib/include",
-                "${workspaceFolder}/lib/abi/include"
+                "${workspaceFolder}/lib/abi/include",
+                "${workspaceFolder}/app/monitor/include"
             ],
             "defines": [],
-            "compilerPath": "/usr/bin/clang",
-            "cStandard": "c17",
+            "compilerPath": "/usr/bin/gcc",
+            "compilerArgs": ["-m32", "-ffreestanding", "-fno-builtin"],
+            "compileCommands": "${workspaceFolder}/compile_commands.json",
+            "cStandard": "c11",
             "cppStandard": "c++17",
-            "intelliSenseMode": "linux-clang-x64"
+            "intelliSenseMode": "linux-gcc-x86"
         }
     ],
     "version": 4

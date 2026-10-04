@@ -26,7 +26,7 @@ static QWORD cluster_to_lba(PFS_VOLUME fs, DWORD c) {
 }
 
 /* 1: 有下一簇, 0: 链结束, <0: 错误。 */
-static int next_cluster(PFS_VOLUME fs, DWORD current, PDWORD next) {
+int next_cluster(PFS_VOLUME fs, DWORD current, PDWORD next) {
     if (!valid_cluster(fs, current))
         return FS_ERR_FORMAT;
     int err = read_sector(fs, (QWORD)fs->fat_lba + current / 128);
@@ -185,7 +185,7 @@ int fs_lookup(PFS_VOLUME fs, PCSTR path, PSFT_T out) {
         p = next;
     }
 }
-
+// 只是返回簇号，不构造文件指针
 int resolve_path(PFS_VOLUME fs, PCSTR path, PDWORD cluster) {
     if (!cluster)
         return FS_PATH_ERROR;
@@ -195,6 +195,29 @@ int resolve_path(PFS_VOLUME fs, PCSTR path, PDWORD cluster) {
         return status;
     *cluster = entry.cluster;
     return 0;
+}
+// 构造出来这样的一个文件指针
+int fs_file_open(PFS_VOLUME fs, PCSTR path, PFS_FILE fp) {
+    if (!fp)
+        return FS_PATH_ERROR;
+    SFT_T entry;
+    int status = fs_lookup(fs, path, &entry);
+    if (status)
+        return status;
+    fp->first_cluster = entry.cluster;
+    fp->attr = entry.attr;
+    fp->length = entry.length;
+    fp->current_cluster = 0;
+    fp->current_cluster_index = 0;
+    fp->opened = 0;
+    fp->position = 0;
+    fp->volume = fs;
+    return 0;
+}
+
+int fs_file_read(PFS_FILE file, PVOID buffer, DWORD count, PDWORD read_count) {
+    PBYTE dst=buffer;
+    DWORD done=0;
 }
 
 int fs_mount(PFS_VOLUME fs, PBLKDEV device) {

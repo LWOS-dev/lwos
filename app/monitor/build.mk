@@ -9,7 +9,7 @@ MON_OBJS	= $(BUILD_DIR)/$(MON_DIR)/head.o \
 			  $(BUILD_DIR)/$(MON_DIR)/idt.o \
 			  $(BUILD_DIR)/$(MON_DIR)/pci_det.o \
 			  $(BUILD_DIR)/$(MON_DIR)/eth_tmp.o \
-			  $(BUILD_DIR)/$(MON_DIR)/fs.o
+			  $(BUILD_DIR)/$(MON_DIR)/fs_monitor.o
 
 $(BUILD_DIR)/$(MON_DIR)/%.o: $(MON_DIR)/src/%.c
 	@mkdir -p $(@D)

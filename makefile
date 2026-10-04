@@ -49,7 +49,7 @@ DEVICE		= /dev/sda
 # 各世界往这里追加自己要放进 FAT 分区的文件, 再声明它从哪来
 FSROOT_FILES =
 
-all: $(IMG)
+all: $(IMG) compile_commands.json
 
 # ---------------------------------------------------------------- 各世界
 # 必须在镜像规则之前 include: 依赖列表里的 $(FSROOT_FILES) 是立即展开的
@@ -69,6 +69,15 @@ $(RESOURCE_FILES): $(FSROOT)/RES/%: resources/%
 endif
 
 # ---------------------------------------------------------------- 通用
+# 逐文件编译参数供 VS Code C/C++ 和 clangd 使用, 区分裸机与宿主工具。
+EDITOR_SOURCES := $(shell find lib app loader tools tests -name '*.c' 2>/dev/null)
+EDITOR_MAKEFILES := $(wildcard boot/build.mk loader/build.mk lib/build.mk lib/*/build.mk app/*/build.mk)
+compile_commands.json: makefile $(EDITOR_MAKEFILES) $(EDITOR_SOURCES) tools/gen_compile_commands.py
+	python3 tools/gen_compile_commands.py
+
+compdb:
+	python3 tools/gen_compile_commands.py
+
 $(BIN_DIR)/%.bin: $(BIN_DIR)/%.elf
 	objcopy -O binary $< $@
 
@@ -129,6 +138,6 @@ clean:
 	rm -f $(IMG) $(DEMO_IMG_GZ)
 	rm -rf $(BUILD_DIR) $(BIN_DIR) $(FSROOT)
 
-.PHONY: all resetimg run clean fsroot webimg test-fs
+.PHONY: all resetimg run clean fsroot webimg test-fs compdb
 
 -include $(shell find $(BUILD_DIR) -name '*.d' 2>/dev/null)
