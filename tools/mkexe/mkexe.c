@@ -1,29 +1,9 @@
+/* 亲手实现的入口。AI 生成的旧框架保存在 mkexe_reference.c。 */
+#include "mkexe.h"
 #include <stdio.h>
-#include <stdint.h>
 
-typedef struct {
-    unsigned int magic;
-    unsigned short version;
-    unsigned short hdr_size;
-    unsigned int flags;
-    unsigned int abi_need;
-
-    unsigned int entry;
-    unsigned int image_off;
-    unsigned int image_size;
-    unsigned int mem_size;
-
-    unsigned int stack_size;
-    unsigned int reloc_off;
-    unsigned int reloc_count;
-    unsigned int sym_off;
-
-    unsigned int sym_count;
-    unsigned int export_off;
-    unsigned int export_count;
-    unsigned int crc32;
-} LwpHdr;
-
-int main() {
-
+int main(void) {
+    /* 从读取文件并打印前 8 字节开始, 见 WALKTHROUGH.md。 */
+    fprintf(stderr, "mkexe: implementation pending\n");
+    return 1;
 }

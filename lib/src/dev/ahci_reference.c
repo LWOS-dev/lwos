@@ -9,7 +9,7 @@
 
 #define AHCI_GHC_AE  0x80000000
 
-#define AHCI_PORT_BASE(port)  (0x100u + 0x80u * (DWORD)(port))
+#define AHCI_PORT_BASE(port)  (0x100u + 0x80u * (u32)(port))
 #define AHCI_PxCLB   0x00
 #define AHCI_PxCLBU  0x04
 #define AHCI_PxFB    0x08

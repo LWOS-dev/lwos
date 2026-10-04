@@ -405,6 +405,7 @@ static void execute(const char* str) {
                 lw_puts("FOUND AT ");
                 lw_put_dword(tmp);
                 lw_puts("\n\r");
+                raw_read(&monitor_fs, (PVOID)0x400000, tmp, 1);
             } else {
                 lw_puts("PATH RESOLVE FAILED\n\r");
             }

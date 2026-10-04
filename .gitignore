@@ -7,7 +7,10 @@ compile_commands.json.tmp
 *.elf
 *.img
 fsroot/
+tools/mkexe/mkexe
+tools/mkexe/*.o
 tools/mkfat/mkfat
+tools/lwcon/lwcon
 
 # Logs
 *.log

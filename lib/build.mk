@@ -10,7 +10,7 @@ $(BUILD_DIR)/lib/app/%.o: lib/src/%.c
 	@mkdir -p $(@D)
 	$(TOOL_C) $(CFLAGS_APP) $(LIB_INC) -c $< -o $@
 
-# ATA 的探测输出目前仍依赖 ABI 私有的 text.h / 控制台实现。
+# 硬件库不依赖 ABI 私有控制台; 探测结果交给调用方显示。
 $(BUILD_DIR)/lib/kern/%.o: lib/src/%.c
 	@mkdir -p $(@D)
-	$(TOOL_C) $(CFLAGS_KERN) $(LIB_INC) -Ilib/abi/include -c $< -o $@
+	$(TOOL_C) $(CFLAGS_KERN) $(LIB_INC) -c $< -o $@

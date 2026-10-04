@@ -109,4 +109,7 @@ int fs_file_size(PFS_FILE file, PDWORD length);
 /* 返回 1 表示 EOF, 0 表示尚未到 EOF, 负值表示错误。 */
 int fs_file_eof(PFS_FILE file);
 
+// 无视文件表信息，直接从簇里面读数据，buffer最好对齐
+int raw_read(PFS_VOLUME fs, PVOID buffer, DWORD cluster, DWORD sector_count);
+
 #endif

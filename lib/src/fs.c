@@ -278,3 +278,18 @@ int fs_mount(PFS_VOLUME fs, PBLKDEV device) {
     fs->mounted = 1;
     return 0;
 }
+
+int raw_read(PFS_VOLUME fs, PVOID buffer, DWORD cluster, DWORD sector_count) {
+    PBYTE p=buffer;
+    DWORD c=cluster;
+    for (int i=0; i<sector_count; i++) {
+        int s=read_sector(fs, cluster_to_lba(fs, c));
+        if (s!=0) {
+            return s;
+        }
+        memcpy(p, fs->buffer, 512);
+        p+=512;
+        next_cluster(fs, c, &c);
+    }
+    return 0;
+}

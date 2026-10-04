@@ -1,4 +1,5 @@
 #include "dev/ata.h"
+#include "text.h"
 #include "dev/blockdev.h"
 
 static ATA_DEV devs[ATA_MAX_DEVICES];
@@ -181,8 +182,83 @@ PCATA_DEV ata_get(BYTE index) {
     return index<n_devs?&devs[index]:0;
 }
 
-/* 探测只更新设备表, 输出由调用方通过 ata_count / ata_get 完成。 */
+static void print_dev_tail(PCATA_DEV d) {
+	puts("\n\rDISX: ");
+    puts(d->type==ATA_DEV_PATAPI?"ATAPI":"ATA");
+    puts(d->lba48?" LBA48 ":" LBA28 ");
+    put_dword((DWORD)d->sectors);
+    puts(" SECTORS (");
+    put_dword((DWORD)(d->sectors>>11));
+    puts("M)\n\r      SERIAL ");
+    puts((char*)d->serial);
+}
+
 void ata_detect(void) {
+	static const char *const chan_name[] = { "PRI", "SEC" };
+	static const char *const drv_name[]  = { "MASTER", "SLAVE " };
+
+	ata_init();
+
+	puts("ATA PROBE, PIO\n\r");
+
+	for (BYTE channel = 0; channel < 2; channel++) {
+		WORD b = base_of(channel);
+
+		if (inb(b + ATA_REG_STATUS) == 0xFF) {
+			puts((char*)chan_name[channel]);
+			puts(" CH=FFH, NO CTRL\n\r");
+			continue;
+		}
+
+		for (BYTE drive = 0; drive < 2; drive++) {
+			PATA_DEV d = &devs[n_devs];
+			int r;
+
+			if (n_devs >= ATA_MAX_DEVICES)
+				break;
+
+			/* Scratch test: write a pattern to two registers the
+			 * drive must hold, and see if it comes back. */
+			ata_select(channel, drive);
+			outb(b + ATA_REG_SECCOUNT0, 0x55);
+			outb(b + ATA_REG_LBA0, 0xAA);
+			if (inb(b + ATA_REG_SECCOUNT0) != 0x55 ||
+			    inb(b + ATA_REG_LBA0) != 0xAA)
+				continue;
+
+			r = ata_identify(channel, drive, d);
+			if (r) {
+				if (r != E_NODEV) {
+					puts((char*)chan_name[channel]);
+					putc(' ');
+					puts((char*)drv_name[drive]);
+					puts(": IDENTIFY FAILED, ");
+					puts((char*)ata_strerror(r));
+					puts("\n\r");
+				}
+				d->present = 0;
+				continue;
+			}
+
+			puts("dev");
+			put_byte(n_devs);
+			puts("  ");
+			puts((char*)chan_name[channel]);
+			putc(' ');
+			puts((char*)drv_name[drive]);
+			puts("  ");
+			puts(d->model);
+			print_dev_tail(d);
+			n_devs++;
+		}
+	}
+
+    puts("DEV FOUND: ");
+	put_byte(n_devs);
+	puts("\n\r");
+}
+
+void ata_detect_quiet(void) {
 	ata_init();
 
 	for (BYTE channel = 0; channel < 2; channel++) {
@@ -216,11 +292,6 @@ void ata_detect(void) {
 			n_devs++;
 		}
 	}
-}
-
-/* 保留旧调用入口; 两个接口现在均不输出文字。 */
-void ata_detect_quiet(void) {
-    ata_detect();
 }
 
 static int setup_lba28(PCATA_DEV d, DWORD lba, BYTE sectors) {

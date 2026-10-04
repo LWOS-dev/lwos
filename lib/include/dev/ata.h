@@ -80,6 +80,9 @@ typedef struct _ATA_DEV {
 typedef const ATA_DEV *PCATA_DEV;
 
 void ata_init(void);
+/* 更新设备表, 不输出文字; quiet 为兼容旧调用的别名。
+ * 仅在启动/重新探测阶段调用, 不得与读写或已注册块设备并发。
+ */
 void ata_detect(void);
 void ata_detect_quiet(void);
 BYTE ata_count(void);
