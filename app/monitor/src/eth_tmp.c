@@ -12,8 +12,8 @@
 #define REG_RDT    0x2818
 
 #define RX_N       8
-#define RX_RING    0x00402000
-#define RX_BUF     0x00403000
+#define RX_RING    0x00303000
+#define RX_BUF     0x00304000
 
 BYTE eth_b, eth_d, eth_f;
 DWORD eth_bar0;

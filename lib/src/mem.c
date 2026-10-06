@@ -94,3 +94,77 @@ void mmap_dump(void) {
     lw_puts("H KB");
     lw_puts("\n\r");
 }
+
+#define MEM_POOL_MAX 512
+
+PMEM_POOL mem_pool;
+BITMAP mem_bm;
+
+void mem_pool_init() { // init pool and bitmap
+    mem_bm.data=(PBYTE)0x300000;
+    mem_bm.nbits=0x100000;
+    bitmap_set_range(&mem_bm,0,0x100000);
+
+    for (DWORD i=0; i<n_entries; i++) {
+        PCARDS_T e=&tab[i];
+        if (e->type==1)
+            bitmap_clear_range(&mem_bm,e->base/0x1000,e->len/0x1000);
+    }
+    bitmap_set_range(&mem_bm,0,1024);
+
+    mem_pool=(PMEM_POOL)0x302000;
+    memzero((PVOID)0x302000, 0x1000);
+}
+
+void mem_pool_dump(PMEM_POOL pool) {
+    lw_puts("BASE=");
+    lw_put_dword(pool->base);
+    lw_puts(" LIMIT=");
+    lw_put_dword(pool->unit_size*4096-1);
+    lw_puts("\n\r");
+}
+PVOID mem_alloc_units(PMEM_POOL pool, DWORD count) {
+    int pos;
+    if (!pool || !count || count>mem_bm.nbits)return 0;
+    pos = bitmap_find_zero_run(&mem_bm, 0, (int)count);
+    if (pos<0)return 0;
+    bitmap_set_range(&mem_bm, pos, (int)count);
+    pool->base=pos;
+    pool->unit_size=count;
+    //mem_pool_dump(pool);
+    return (PVOID)(pool->base);
+}
+
+PVOID kmalloc(int size) {
+    if (size<0)return 0;
+    int cnt=(size+4095)/4096;
+ 
+    PVOID ptr=0;
+
+    for (int i=0; i<MEM_POOL_MAX; i++) {
+        if (mem_pool[i].unit_size==0) {
+            ptr=mem_alloc_units(&mem_pool[i], cnt);
+            if (!ptr) {
+                return (PVOID)-1;
+            }
+            return ptr;
+        }
+    }
+    lw_puts("OUT OF MEMORY\n\r");
+    return (PVOID)-2; // out of memory
+}
+void kfree(PVOID ptr) {
+    if (ptr<0)return;
+
+    for (int i=0; i<MEM_POOL_MAX; i++) {
+        if (mem_pool[i].unit_size==0)continue;
+        if (
+            ((int)ptr>=(mem_pool[i].base*4096)) &&
+            ((int)ptr<(mem_pool[i].base*4096+mem_pool[i].unit_size*4096))
+        ) {
+            bitmap_clear_range(
+                &mem_bm, mem_pool[i].base, mem_pool[i].unit_size
+            );
+        }
+    }
+}

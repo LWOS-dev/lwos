@@ -9,6 +9,7 @@
 #include "convert.h"
 #include "string.h"
 #include "dev/blockdev.h"
+#include "bitmap.h"
 
 PVOID *lw_abi_base;
 static FS_VOLUME monitor_fs;
@@ -400,19 +401,12 @@ static void execute(const char* str) {
             break;
         }
         case '.': { // new function test
-            DWORD tmp;
-            if (resolve_path(&monitor_fs, var_path, &tmp) == 0) {
-                lw_puts("FOUND AT ");
-                lw_put_dword(tmp);
-                lw_puts("\n\r");
-                raw_read(&monitor_fs, (PVOID)0x400000, tmp, 1);
-            } else {
-                lw_puts("PATH RESOLVE FAILED\n\r");
-            }
+            kmalloc(123);
             break;
         }
     }
 }
+
 __attribute__((section(".text.start")))
 void monitor_main(void) {
 
@@ -422,6 +416,7 @@ void monitor_main(void) {
     lw_puts("\n\rLWOS MONITOR v2 COPYLEFT 2026\n\r");
 
     idt_init();
+    mem_pool_init();
     lw_kbd_probe();
     lw_kbd_enable();
     lw_fpu_init();
