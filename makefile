@@ -59,6 +59,7 @@ include lib/build.mk
 include lib/abi/build.mk
 include app/monitor/build.mk
 include app/test1/build.mk
+include tools/mkexe/build.mk
 
 # resources/ 的文件在镜像中放到 /RES/, 源文件不会被 clean 删除。
 RESOURCE_SRCS := $(shell find resources -type f 2>/dev/null)

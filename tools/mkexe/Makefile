@@ -4,7 +4,7 @@ TARGET = ../../build/tools/mkexe
 
 all: $(TARGET)
 
-$(TARGET): mkexe.c mkexe.h ../../lib/include/lwp.h ../../lib/include/stdint.h
+$(TARGET): mkexe.c mkexe.h hdr.h ../../lib/include/lwp.h ../../lib/include/stdint.h
 	mkdir -p $(@D)
 	$(CC) $(CFLAGS) mkexe.c -o $@
 
@@ -29,6 +29,13 @@ $(TEST_DIR)/test.elf: $(TEST_DIR)/test.o lwp.ld
 		-T lwp.ld $< -o $@
 
 .PHONY: test-elf
+
+test-exe: $(TEST_DIR)/test.exe
+
+$(TEST_DIR)/test.exe: $(TEST_DIR)/test.elf $(TARGET)
+	$(TARGET) $< $@
+
+.PHONY: test-exe
 
 # AI 生成的学习参考单独构建, 不替代正式 mkexe。
 REFERENCE = ../../build/tools/mkexe-reference
