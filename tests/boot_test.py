@@ -55,13 +55,66 @@ for machine in ['pc','q35']:
                     qmp('send-key', {'keys':[{'type':'qcode','data':key}], 'hold-time':50})
                     time.sleep(.15)
                 time.sleep(.2)
+            # BOOT.INI preloads resman; monitor can call it repeatedly and return.
+            qmp('pmemsave', {'val': 0x180000, 'size': 24,
+                'filename': str(work/'resman-head.bin')})
+            header = (work/'resman-head.bin').read_bytes()
+            if header[:4] != b'LWAB' or header[20:24] != b'LWRM':
+                raise RuntimeError(machine+' resman was not preloaded')
+            rm_symbols = {line.split()[2]: int(line.split()[0], 16)
+                for line in subprocess.check_output(['nm', '-n', str(root/'bin/resman.elf')],
+                                                     text=True).splitlines()
+                if len(line.split()) == 3}
+            def read32(address):
+                qmp('pmemsave', {'val': address, 'size': 4,
+                    'filename': str(work/'word.bin')})
+                return int.from_bytes((work/'word.bin').read_bytes(), 'little')
+            for attempt in range(2):
+                command(['c', 's', 'ret'])
+                command(['r', 'm', 'ret'])
+                for i in range(30):
+                    if graphics_state() == 1: break
+                    time.sleep(.1)
+                if graphics_state() != 1:
+                    raise RuntimeError(machine+' resman GUI did not start')
+                time.sleep(.3)
+                w, h, stride, fb, bb = [read32(rm_symbols[name])
+                    for name in ('fb_w', 'fb_h', 'pitch', 'fb', 'bb')]
+                x, y = w // 2, h // 2
+                def pixel(base, px, py): return read32(base + py * stride + px * 4)
+                if pixel(fb, x+2, y+2) != 0xffffff:
+                    raise RuntimeError(machine+' initial cursor missing')
+                qmp('input-send-event', {'events': [
+                    {'type':'rel', 'data':{'axis':'x', 'value':32}},
+                    {'type':'rel', 'data':{'axis':'y', 'value':16}}]})
+                time.sleep(.3)
+                if pixel(fb, x+34, y+18) != 0xffffff:
+                    raise RuntimeError(machine+' mouse movement failed')
+                if pixel(fb, x+2, y+2) != pixel(bb, x+2, y+2):
+                    raise RuntimeError(machine+' cursor left a trail')
+                for pressed, color in ((True, 0xff4040), (False, 0xffffff)):
+                    qmp('input-send-event', {'events': [
+                        {'type':'btn', 'data':{'button':'left', 'down':pressed}}]})
+                    time.sleep(.2)
+                    if pixel(fb, x+34, y+18) != color:
+                        raise RuntimeError(machine+' mouse button state failed')
+                command(['esc'])
+                if graphics_state() != 0:
+                    raise RuntimeError(machine+' Escape did not leave GUI')
+                qmp('pmemsave', {'val': 0xb8000, 'size': 4000,
+                    'filename': str(work/'resman-screen.bin')})
+                raw = (work/'resman-screen.bin').read_bytes()
+                screen = bytes(raw[::2]).decode('ascii', 'replace').replace('\x00', ' ')
+                if ('RESMAN RETURNED: 00000000' not in screen or
+                    not screen.rstrip().endswith('>')):
+                    raise RuntimeError(machine+' resman call/return failed: '+screen)
             command(['v','e','ret'])
             if graphics_state() != 1:
                 raise RuntimeError(machine+' video trampoline enter failed')
             command(['v','x','ret'])
             if graphics_state() != 0:
                 raise RuntimeError(machine+' video trampoline exit failed')
-            print(f'PASS: {machine} boot reaches monitor; video enter/exit works', flush=True)
+            print(f'PASS: {machine} boot; mouse motion/buttons/background; repeated GUI entry/exit; video', flush=True)
             qmp('quit'); p.wait(timeout=3)
         finally:
             if p.poll() is None: p.terminate();p.wait(timeout=3)

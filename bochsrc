@@ -1,7 +1,7 @@
 plugin_ctrl: unmapped=true, biosdev=true, speaker=true, extfpuirq=true, parallel=true, serial=true
 config_interface: textconfig
 display_library: x
-memory: guest=32, host=32
+memory: guest=64, host=64
 romimage: file="/usr/local/share/bochs/BIOS-bochs-latest"
 vgaromimage: file="/usr/local/share/bochs/VGABIOS-lgpl-latest.bin"
 boot: disk
@@ -20,4 +20,4 @@ error: action=report
 info: action=report
 debug: action=ignore
 keyboard: type=mf, serial_delay=150
-mouse: type=ps2, enabled=false
+mouse: type=ps2, enabled=true

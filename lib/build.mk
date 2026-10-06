@@ -4,7 +4,9 @@ APP_LIB_SRCS := string.c \
 				convert.c \
 				mem.c \
 				fs.c \
-				bitmap.c
+				bitmap.c \
+				gfx.c \
+				ui.c
 APP_LIB_OBJS := $(APP_LIB_SRCS:%.c=$(BUILD_DIR)/lib/app/%.o)
 
 KERN_LIB_SRCS := io.c pci.c dev/ata.c dev/blockdev.c

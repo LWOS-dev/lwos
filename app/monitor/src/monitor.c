@@ -10,6 +10,7 @@
 #include "string.h"
 #include "dev/blockdev.h"
 #include "bitmap.h"
+#include "resman.h"
 
 PVOID *lw_abi_base;
 static FS_VOLUME monitor_fs;
@@ -26,14 +27,7 @@ static void no_abi_halt(void) {
     }
 }
 
-static int fb_w, fb_h, fb_pitch;
-static PDWORD framebuffer;
 static char line[128];
-
-void putpixel(int x, int y, DWORD color) {
-    if((x>=fb_w)||(x<0)||(y>=fb_h)||(y<0))return;
-    framebuffer[x+y*fb_pitch]=color&0xffffff;
-}
 
 static void prompt_read() {
     int n = 0;
@@ -54,6 +48,7 @@ extern void pci_detail(BYTE bus,BYTE dev,BYTE fn);
 extern int pci_find_class(BYTE cls, BYTE sub, PBYTE bus, PBYTE dev, PBYTE fn);
 
 void help() {
+    lw_puts("rm                      Start preloaded RESMAN and return\n\r");
     lw_puts("cb/s                    Clear buffer/screen\n\r");
     lw_puts("tb                      Type down buffer\n\r");
     lw_puts("sb                      Show buffer\n\r");
@@ -80,6 +75,34 @@ static void display_banner(void) {
     lw_puts("\n   LWOS MT v2 - New Technology Operating System\n\n\r");
 }
 static char var_path[256];
+static void start_resman(void)
+{
+    PVOID *head = (PVOID *)LW_RM_BASE;
+    DWORD entry = (DWORD)head[LW_RM_SLOT_ENTRY];
+    DWORD bss_start = (DWORD)head[LW_RM_SLOT_BSS_START];
+    DWORD bss_end = (DWORD)head[LW_RM_SLOT_BSS_END];
+    static int prepared;
+
+    if (head[LW_RM_SLOT_MAGIC] != (PVOID)LW_RM_MAGIC ||
+        head[LW_RM_SLOT_IDENT] != (PVOID)LW_RM_IDENT ||
+        entry < LW_RM_BASE + LW_RM_SLOT_COUNT * sizeof(PVOID) ||
+        entry >= bss_start || bss_start > bss_end ||
+        bss_end > LW_RM_LIMIT || head[LW_RM_SLOT_STACK_TOP] != 0) {
+        lw_puts("RESMAN MISSING OR INVALID\n\r");
+        return;
+    }
+
+    /* Keep state on subsequent calls; never reset a live resource manager. */
+    if (!prepared) {
+        memzero((PVOID)bss_start, bss_end - bss_start);
+        prepared = 1;
+    }
+    int result = ((RESMAN_ENTRY)entry)(lw_abi_base);
+    lw_puts("RESMAN RETURNED: ");
+    lw_put_dword((DWORD)result);
+    lw_puts("\n\r");
+}
+
 static void execute(const char* str) {
     char c0;
     char c1;
@@ -95,6 +118,11 @@ static void execute(const char* str) {
             *str++:0;
 
     switch (c0) {
+        case 'r': {
+            if (c1 == 'm') start_resman();
+            else lw_puts("USAGE: rm\n\r");
+            break;
+        }
         case 'm': {
             mmap_init();
             mmap_dump();
@@ -406,7 +434,8 @@ static void execute(const char* str) {
         }
     }
 }
-
+const char config_file[]="/monitor.rc";
+int mon_block=1;
 __attribute__((section(".text.start")))
 void monitor_main(void) {
 
@@ -417,18 +446,13 @@ void monitor_main(void) {
 
     idt_init();
     mem_pool_init();
+    if (fs_init(&monitor_fs) < 0)
+        lw_puts("FILESYSTEM INIT FAILED\n\r");
     lw_kbd_probe();
     lw_kbd_enable();
     lw_fpu_init();
 
-    fb_h = lw_get_fb_h();
-    fb_w = lw_get_fb_w();
-    fb_pitch = lw_get_fb_pitch()/4;
-    framebuffer = (PDWORD)lw_get_fb();
-
-    lw_resv_entry();
-
-    while (1) {
+    while (mon_block) {
         prompt_read();
         execute(line);
     }

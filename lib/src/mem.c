@@ -95,7 +95,7 @@ void mmap_dump(void) {
     lw_puts("\n\r");
 }
 
-#define MEM_POOL_MAX 512
+#define MEM_POOL_MAX 16384
 
 PMEM_POOL mem_pool;
 BITMAP mem_bm;
@@ -112,8 +112,8 @@ void mem_pool_init() { // init pool and bitmap
     }
     bitmap_set_range(&mem_bm,0,1024);
 
-    mem_pool=(PMEM_POOL)0x302000;
-    memzero((PVOID)0x302000, 0x1000);
+    mem_pool=(PMEM_POOL)0x320000;
+    memzero((PVOID)0x320000, 0x20000);
 }
 
 void mem_pool_dump(PMEM_POOL pool) {
@@ -131,18 +131,22 @@ PVOID mem_alloc_units(PMEM_POOL pool, DWORD count) {
     bitmap_set_range(&mem_bm, pos, (int)count);
     pool->base=pos;
     pool->unit_size=count;
-    //mem_pool_dump(pool);
-    return (PVOID)(pool->base);
+    mem_pool_dump(pool);
+    return (PVOID)(pool->base*4096);
 }
 
 PVOID kmalloc(int size) {
     if (size<0)return 0;
     int cnt=(size+4095)/4096;
+    lw_put_dword(size);
+    lw_puts(" NEED\n\r");
  
     PVOID ptr=0;
 
     for (int i=0; i<MEM_POOL_MAX; i++) {
         if (mem_pool[i].unit_size==0) {
+            lw_put_dword(cnt);
+            lw_puts(" BLOCKS\n\r");
             ptr=mem_alloc_units(&mem_pool[i], cnt);
             if (!ptr) {
                 return (PVOID)-1;

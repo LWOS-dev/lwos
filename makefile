@@ -57,9 +57,28 @@ include boot/build.mk
 include loader/build.mk
 include lib/build.mk
 include lib/abi/build.mk
+include app/resman/build.mk
 include app/monitor/build.mk
 include app/test1/build.mk
+
+# ---------------------------------------------------------------- 杂项文件
+# 在这里登记额外放进镜像的文件, 必须位于下面的 fsroot / 镜像规则之前。
+# 每个文件写两行: 加入 FSROOT_FILES, 再指定它的来源。
+
+# mkexe 测试程序: test.c -> test.elf -> test.exe -> 镜像根目录 /TEST.EXE。
 include tools/mkexe/build.mk
+FSROOT_FILES += $(FSROOT)/TEST.EXE
+$(FSROOT)/TEST.EXE: $(MKEXE_TEST_EXE)
+
+FSROOT_FILES += $(FSROOT)/MONITOR.RC
+$(FSROOT)/MONITOR.RC: app/monitor/monitor.rc
+
+# 字体二进制保存在 resource/, clean 只删除 fsroot 中的副本。
+resource/vgafont.bin: resource/vgafont.h tools/mkvgafont.py
+	python3 tools/mkvgafont.py $< $@
+
+FSROOT_FILES += $(FSROOT)/VGAFONT.BIN
+$(FSROOT)/VGAFONT.BIN: resource/vgafont.bin
 
 # resources/ 的文件在镜像中放到 /RES/, 源文件不会被 clean 删除。
 RESOURCE_SRCS := $(shell find resources -type f 2>/dev/null)
@@ -68,6 +87,11 @@ FSROOT_FILES += $(RESOURCE_FILES)
 ifneq ($(strip $(RESOURCE_FILES)),)
 $(RESOURCE_FILES): $(FSROOT)/RES/%: resources/%
 endif
+
+# 添加单个文件的例子 (取消注释前先准备源文件):
+# FSROOT_FILES += $(FSROOT)/CONFIG.TXT
+# $(FSROOT)/CONFIG.TXT: resources/config.txt
+# 复制由下方通用规则完成, 不需要再写 cp。
 
 # ---------------------------------------------------------------- 通用
 # 逐文件编译参数供 VS Code C/C++ 和 clangd 使用, 区分裸机与宿主工具。

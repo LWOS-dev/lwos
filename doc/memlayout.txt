@@ -1,0 +1,22 @@
+内存分布：
+100000 ABI + BSS
+102f20
+...
+180000 RESMAN
+...
+200000 monitor + BSS + stack
+...
+300000 memory bitmap
+320000
+---
+320000 memory pool
+340000
+---
+340000 net debug ring
+341000
+---
+341000 net debug buffer
+342000
+...
+350000 VGA FONT IMAGE
+351000

@@ -23,6 +23,8 @@ struct _RM_IMAGE {
 
 extern const PVOID lw_rm[LW_RM_SLOT_COUNT];
 
+int resman_main(PVOID *abi);
+
 int resman_init(void);
 DWORD resman_version(void);
 

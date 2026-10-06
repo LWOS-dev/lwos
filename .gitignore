@@ -4,6 +4,7 @@ compile_commands.json
 compile_commands.json.tmp
 *.o
 *.bin
+!resource/vgafont.bin
 *.elf
 *.img
 fsroot/

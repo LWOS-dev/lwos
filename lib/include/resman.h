@@ -4,6 +4,9 @@
 #include "stdint.h"
 
 #define LW_RM_BASE 0x00180000u
+#define LW_RM_LIMIT 0x00200000u
+/* Called by monitor on its existing stack; returns an RM_* status. */
+typedef int (*RESMAN_ENTRY)(PVOID *abi);
 #define LW_RM_MAGIC 0x4241574cu
 #define LW_RM_IDENT 0x4d52574cu
 #define LW_ENV_VERSION 1u
