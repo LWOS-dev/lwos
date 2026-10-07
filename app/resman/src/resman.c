@@ -6,36 +6,36 @@
 #include "mouse.h"
 #include "ui.h"
 
+#include "task.h"
+
 PVOID *lw_abi_base;
 PVOID p;
+DRAG drag;
+static DWORD cur_temp[100];
+static void draw_cursor(int x, int y, BYTE buttons);
 
-/* The scene stays in the backbuffer; only the small cursor overlay touches VRAM. */
+/* Compose in RAM, present once, then restore the cursor-free backbuffer. */
 static void cursor_present(int x, int y, BYTE buttons, int erase)
 {
     int w = lw_get_fb_w(), h = lw_get_fb_h();
     DWORD stride = lw_get_fb_pitch();
-    PBYTE front = (PBYTE)lw_get_fb();
-    /* draw_mouse shape: two 5-pixel arms and a 10-pixel diagonal.
-     * Draw directly to the front buffer so the saved scene stays cursor-free.
-     */
     for (int row = 0; row < 10 && y + row < h; row++) {
-        PDWORD dst = (PDWORD)(front + (y + row) * stride);
-        PDWORD src = (PDWORD)((PBYTE)p + (y + row) * stride);
+        PDWORD pixels = (PDWORD)((PBYTE)p + (y + row) * stride);
         for (int col = 0; col < 10 && x + col < w; col++) {
-            if (erase) dst[x + col] = src[x + col];
-            else if ((row == 0 && col < 5) ||
-                     (col == 0 && row < 5) || col == row)
-                dst[x + col] = buttons ? 0xff4040 : 0;
+            if (erase) pixels[x+col] = cur_temp[row*10+col];
+            else cur_temp[row*10+col] = pixels[x+col];
         }
     }
+    if (!erase) draw_cursor(x,y,buttons);
 }
 static void draw_cursor(int x,int y,BYTE buttons) {
+    DWORD color=buttons?0xff4040:0;
     for (int i=0;i<5;i++) {
-        putpixel(x,y+i,0xffffff);
-        putpixel(x+i,y,0xffffff);
+        putpixel(x,y+i,color);
+        putpixel(x+i,y,color);
     }
     for (int i=0;i<10;i++) {
-        putpixel(x+i,y+i,0xffffff);
+        putpixel(x+i,y+i,color);
     }
 }
 
@@ -70,6 +70,7 @@ static void keyboard_feed(GUI_STATE *gui, BYTE scan)
 
 static void on_mouse(GUI_STATE *gui, const MOUSE_EVENT *event)
 {
+    BYTE previous = gui->buttons;
     gui->x += event->dx;
     gui->y -= event->dy;
     if (gui->x < 0) gui->x = 0;
@@ -77,6 +78,17 @@ static void on_mouse(GUI_STATE *gui, const MOUSE_EVENT *event)
     if ((DWORD)gui->x >= lw_get_fb_w()) gui->x = lw_get_fb_w() - 1;
     if ((DWORD)gui->y >= lw_get_fb_h()) gui->y = lw_get_fb_h() - 1;
     gui->buttons = event->buttons;
+    if (drag_mouse(&drag,gui->x,gui->y,previous,gui->buttons)) {
+        int max_x=(int)lw_get_fb_w()-drag.R.w;
+        int max_y=(int)lw_get_fb_h()-drag.R.h;
+        if (max_x<0)max_x=0;
+        if (max_y<0)max_y=0;
+        if (drag.R.x<0)drag.R.x=0;
+        if (drag.R.y<0)drag.R.y=0;
+        if (drag.R.x>max_x)drag.R.x=max_x;
+        if (drag.R.y>max_y)drag.R.y=max_y;
+        gui->scene_dirty=1;
+    }
     gui->cursor_dirty = 1;
 }
 
@@ -102,22 +114,30 @@ static void poll_input(GUI_STATE *gui)
         keyboard_feed(gui, scan);
     }
 }
-DWORD cur_temp[100];
+
+static void test_gfx(GUI_STATE *gui) {
+    puts_xy(50, 50, "HELLO\0", 0, 0xffffff);
+}
 static void present_cursor(GUI_STATE *gui)
 {
-    if (!gui->cursor_dirty) return;
-    cursor_present(gui->drawn_x, gui->drawn_y, 0, 1);
+    if (!gui->cursor_dirty && !gui->scene_dirty) return;
+    if (gui->scene_dirty) {
+        gfx_fill(0xffffff);
+        draw_drag(&drag);
+        test_gfx(gui);
+    }
+    RECT old={gui->drawn_x,gui->drawn_y,10,10};
+    RECT next={gui->x,gui->y,10,10};
+    gfx_invalidate_rect(&old);
+    gfx_invalidate_rect(&next);
     cursor_present(gui->x, gui->y, gui->buttons, 0);
+    gfx_update_region();
+    cursor_present(gui->x, gui->y, gui->buttons, 1);
     gui->drawn_x = gui->x;
     gui->drawn_y = gui->y;
 
     gui->cursor_dirty = 0;
-}
-
-DRAG drag;
-
-static void test_gfx(GUI_STATE *gui) {
-    puts_xy(50, 50, "HELLO\0", 0, 0xffffff);
+    gui->scene_dirty = 0;
 }
 
 static void resman_loop(void)
@@ -127,15 +147,15 @@ static void resman_loop(void)
     gui.x = gui.drawn_x = lw_get_fb_w() / 2;
     gui.y = gui.drawn_y = lw_get_fb_h() / 2;
     gui.cursor_dirty = 1;
+    gui.scene_dirty = 1;
     while (gui.running) {
         poll_input(&gui);
-        test_gfx(&gui);
-        if ();
         /* Add application updates here, keeping each iteration nonblocking. */
-        gfx_update_region();
         present_cursor(&gui);
     }
 }
+
+SMP_SEG smp;
 
 int resman_main(PVOID *abi)
 {
@@ -151,6 +171,21 @@ int resman_main(PVOID *abi)
         mem_pool_init();
         memory_ready = 1;
     }
+
+    gdt_init();
+
+    seg_xlat(&smp, sys_gdt+5);
+    lw_put_qword(*(PQWORD)(sys_gdt+5));
+    lw_puts("\n\rBASE=");
+    lw_put_dword(smp.base);
+    lw_puts(" LIMIT=");
+    lw_put_dword(smp.base+(smp.limit+1)<<12);
+
+    while (1);
+
+    return RM_OK;
+    //暂时不用GUI
+
     if (lw_get_fb_bpp() != 32 || !lw_get_fb_w() || !lw_get_fb_h())
         return RM_ERR_FORMAT;
     set_info(lw_get_fb_w(), lw_get_fb_h(), 0, lw_get_fb_pitch());
@@ -174,7 +209,8 @@ int resman_main(PVOID *abi)
     gfx_clear();
     gfx_fill(0xffffff);
 
-    drag.X=50,drag.Y=50,drag.W=100,drag.H=100;
+    drag.R.x=50,drag.R.y=50,drag.R.w=100,drag.R.h=100;
+    drag.dragging=0;
 
     resman_loop();
     mouse_shutdown();

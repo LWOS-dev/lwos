@@ -8,11 +8,21 @@ RECT dirty_rects[16];
 int dirty_rect_cnt;
 
 static void add_dr(PCRECT pr) {
+    if (pr->w<=0 || pr->h<=0)return;
+    if (dirty_rect_cnt>=16) {
+        dirty_rect_cnt=1;
+        dirty_rects[0]=(RECT){0,0,(int)fb_w,(int)fb_h};
+        return;
+    }
     dirty_rects[dirty_rect_cnt].x=pr->x;
     dirty_rects[dirty_rect_cnt].y=pr->y;
     dirty_rects[dirty_rect_cnt].w=pr->w;
     dirty_rects[dirty_rect_cnt].h=pr->h;
     dirty_rect_cnt++;
+}
+
+void gfx_invalidate_rect(PCRECT r) {
+    add_dr(r);
 }
 
 void set_info(int _w, int _h, int _bpp, int _pitch) {
@@ -42,8 +52,13 @@ void gfx_update() {
     }
 }
 void gfx_update_rect(PRECT p) {
-    for (int i=p->x; i<p->x+p->w; i++) {
-        for (int j=p->y; j<p->y+p->h; j++) {
+    if (p->w<=0 || p->h<=0)return;
+    int x=p->x<0?0:p->x, y=p->y<0?0:p->y;
+    long long right=(long long)p->x+p->w, bottom=(long long)p->y+p->h;
+    int x_end=right>(long long)fb_w?(int)fb_w:(int)right;
+    int y_end=bottom>(long long)fb_h?(int)fb_h:(int)bottom;
+    for (int i=x; i<x_end; i++) {
+        for (int j=y; j<y_end; j++) {
             ((PDWORD)((PBYTE)fb+(DWORD)j*pitch))[i]=
             ((PDWORD)((PBYTE)bb+(DWORD)j*pitch))[i];
         }
@@ -56,10 +71,12 @@ void gfx_update_region() {
     dirty_rect_cnt=0;
 }
 void gfx_fill(DWORD color) {
-    for (int i=0; i<fb_size(); i++) {
+    for (DWORD i=0; i<(DWORD)fb_size()/sizeof(DWORD); i++) {
         bb[i]=color;
-        fb[i]=color;
     }
+    dirty_rect_cnt=0;
+    RECT full={0,0,(int)fb_w,(int)fb_h};
+    add_dr(&full);
 }
 
 PBYTE img_vgafont;
@@ -93,7 +110,7 @@ void puts_xy(int x, int y, PCSTR str, DWORD fc, DWORD bc) {
     d.w=8*i;
     add_dr(&d);
 }
-void draw_rect(int x, int y, int w, int h, DWORD color) {
+void draw_rectr(int x, int y, int w, int h, DWORD color) {
     RECT d;
     d.x=x;
     d.y=y;
@@ -106,12 +123,15 @@ void draw_rect(int x, int y, int w, int h, DWORD color) {
         }
     }
 }
-
-int is_inside(int x, int y, int x1, int y1, int x2, int y2) {
-    if (x>=x1 || x<x2) {
-        if (y>=y1 || y<y2) {
-            return 1;
+void draw_rect(PRECT r, DWORD color) {
+    add_dr(r);
+    for (int i=r->x; i<r->x+r->w; i++) {
+        for (int j=r->y; j<r->y+r->h; j++) {
+            putpixel(i,j,color);
         }
     }
-    return 0;
+}
+
+int is_inside(int x, int y, int x1, int y1, int x2, int y2) {
+    return x>=x1 && x<x2 && y>=y1 && y<y2;
 }

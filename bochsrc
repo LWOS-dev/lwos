@@ -20,4 +20,4 @@ error: action=report
 info: action=report
 debug: action=ignore
 keyboard: type=mf, serial_delay=150
-mouse: type=ps2, enabled=true
+mouse: type=ps2, enabled=false

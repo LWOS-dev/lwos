@@ -8,6 +8,8 @@ RM_OBJS := $(BUILD_DIR)/$(RM_DIR)/head.o $(BUILD_DIR)/$(RM_DIR)/resman.o
 RM_LIB_SRCS := mem.c \
 			   bitmap.c \
 			   gfx.c \
+			   ui.c \
+			   task.c \
 			   mouse.c
 RM_LIB_OBJS := $(RM_LIB_SRCS:%.c=$(BUILD_DIR)/lib/kern/%.o)
 
