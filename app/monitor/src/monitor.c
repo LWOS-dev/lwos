@@ -429,7 +429,14 @@ static void execute(const char* str) {
             break;
         }
         case '.': { // new function test
-            kmalloc(123);
+            FS_FILE file;
+            DWORD dummy;
+            if (fs_file_open(&monitor_fs, "/boot.ini", &file)!=0) {
+                lw_puts("NOT FOUND\n\r");
+                return;
+            }
+            lw_puts("FOUND\n\r");
+            fs_file_read(&file, (PVOID)0x400000, file.length, &dummy);
             break;
         }
     }

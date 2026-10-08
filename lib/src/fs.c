@@ -16,6 +16,11 @@ static int read_sector(PFS_VOLUME fs, QWORD lba) {
         return FS_ERR_IO;
     return fs->device->read(fs->device, lba, 1, fs->buffer) ? FS_ERR_IO : 0;
 }
+static int write_sector(PFS_VOLUME fs, QWORD lba) {
+    if (!fs->device || !fs->device->read || lba >= fs->device->sectors)
+        return FS_ERR_IO;
+    return fs->device->write(fs->device, lba, 1, fs->buffer) ? FS_ERR_IO : 0;
+}
 
 static int valid_cluster(PFS_VOLUME fs, DWORD c) {
     return c >= 2 && c - 2 < fs->cluster_count;
@@ -216,8 +221,50 @@ int fs_file_open(PFS_VOLUME fs, PCSTR path, PFS_FILE fp) {
 }
 
 int fs_file_read(PFS_FILE file, PVOID buffer, DWORD count, PDWORD read_count) {
-    PBYTE dst=buffer;
-    DWORD done=0;
+    PBYTE buf=buffer;
+    DWORD c=0,i=0;
+    DWORD cnt=0;
+    DWORD t=file->position/0x200;
+    WORD cli=file->position&0x1ff;
+    if (file->current_cluster&&file->current_cluster_index<t) {
+        c=file->current_cluster;
+        i=file->current_cluster_index;
+    } else {
+        c=file->first_cluster;
+        i=0;
+    }
+    while (i<t) {
+        int status=next_cluster(file->volume,c,&c);
+        if (status<0)return status;
+        if (status==0)return FS_ERR_FORMAT;
+        i++;
+    }
+    file->volume->device->read(
+        file->volume->device,
+        cluster_to_lba(file->volume, c),
+        1,
+        file->volume->buffer
+    );
+    for (cnt=0; cnt<count; cnt++) {
+        if (cli>=0x200) {
+            int status=next_cluster(file->volume,c,&c);
+            if (status<0)return status;
+            if (status==0)return FS_ERR_FORMAT;
+            i++;
+            cli=0;
+            file->volume->device->read(
+                file->volume->device,
+                cluster_to_lba(file->volume, c),
+                1,
+                file->volume->buffer
+            );
+        }
+        *(buf+cnt)=*(file->volume->buffer+cli);
+        cli++;
+    }
+    file->current_cluster=c;
+    file->current_cluster_index=i;
+    *read_count=cnt;
 }
 
 int fs_mount(PFS_VOLUME fs, PBLKDEV device) {
@@ -278,7 +325,51 @@ int fs_mount(PFS_VOLUME fs, PBLKDEV device) {
     fs->mounted = 1;
     return 0;
 }
-
+int fs_file_seek(PFS_FILE file, long long offset, int origin) {
+    switch (origin) {
+        case FS_SEEK_SET: {
+            if (offset<0)return FS_ERR_RANGE;
+            file->position=offset;
+            break;
+        }
+        case FS_SEEK_END: {
+            if (offset>0)return FS_ERR_RANGE;
+            if ((-offset)>file->length)return FS_ERR_RANGE;
+            file->position=file->length-1-offset;
+            break;
+        }
+        case FS_SEEK_CUR: {
+            if ((file->position+offset)>file->length ||
+                (file->position+offset)<0)return FS_ERR_RANGE;
+            file->position+=offset;
+            break;
+        }
+        default: {
+            return FS_ERR_BAD_HANDLE;
+            break;
+        }
+    }
+}
+int fs_file_tell(PFS_FILE file, PDWORD position) {
+    if (!file)return FS_ERR_BAD_HANDLE;
+    *position=file->position;
+    return 0;
+}
+int fs_file_size(PFS_FILE file, PDWORD length) {
+    if (!file)return FS_ERR_BAD_HANDLE;
+    *length=file->length;
+    return 0;
+}
+int fs_file_eof(PFS_FILE file) {
+    if (!file)return FS_ERR_BAD_HANDLE;
+    if (file->position>file->length)return FS_ERR_RANGE;
+    return (file->position==file->length)?1:0;
+}
+int fs_file_close(PFS_FILE file) {
+    if (!file)return FS_ERR_BAD_HANDLE;
+    memzero(file, sizeof(FS_FILE));
+    return 0;
+}
 int raw_read(PFS_VOLUME fs, PVOID buffer, DWORD cluster, DWORD sector_count) {
     PBYTE p=buffer;
     DWORD c=cluster;
