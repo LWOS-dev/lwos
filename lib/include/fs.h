@@ -22,6 +22,7 @@ enum {
     FS_ENTRY_END = 0,
     FS_ENTRY_VALID = 1,
     FS_ENTRY_SKIP = 2,
+    FS_ENTRY_IDLE = 3,
     FS_PATH_ERROR = -1,
     FS_ERR_FORMAT = -2,
     FS_ERR_IO = -4,
@@ -30,7 +31,8 @@ enum {
     FS_ERR_NOT_FOUND = -7,
     FS_ERR_IS_DIR = -8,
     FS_ERR_BAD_HANDLE = -9,
-    FS_ERR_RANGE = -10
+    FS_ERR_RANGE = -10,
+    FS_ERR_NOFREE = -11
 };
 /* 调用方持有卷及缓冲区, 不同卷之间不共享解析状态。
  * 同一卷暂不支持并发调用; device 必须在挂载期间一直有效。
@@ -38,6 +40,7 @@ enum {
 typedef struct _FS_VOLUME {
     PBLKDEV device;
     DWORD fat_lba, data_lba, root_cluster, cluster_count;
+    DWORD cluster_hint; // last idle
     BYTE sectors_per_cluster;
     int mounted;
     BYTE buffer[512];
@@ -112,4 +115,16 @@ int fs_file_eof(PFS_FILE file);
 // 无视文件表信息，直接从簇里面读数据，buffer最好对齐
 int raw_read(PFS_VOLUME fs, PVOID buffer, DWORD cluster, DWORD sector_count);
 
+int fs_sync(PFS_VOLUME fs);
+int get_fat(PFS_VOLUME fs, DWORD cluster, PDWORD value);
+int set_fat(PFS_VOLUME fs, DWORD cluster, PCDWORD value);
+int find_free_cluser(PFS_VOLUME fs, PDWORD cluster);
+int free_clusters(PFS_VOLUME fs, DWORD first_cluster);
+int alloc_clusters(
+    PFS_VOLUME fs,
+    DWORD count,
+    PDWORD first_cluster,
+    PDWORD last_cluster
+);
+int append_clusters(PFS_VOLUME fs, DWORD prev_t, DWORD next_h);
 #endif

@@ -17,7 +17,7 @@ static int read_sector(PFS_VOLUME fs, QWORD lba) {
     return fs->device->read(fs->device, lba, 1, fs->buffer) ? FS_ERR_IO : 0;
 }
 static int write_sector(PFS_VOLUME fs, QWORD lba) {
-    if (!fs->device || !fs->device->read || lba >= fs->device->sectors)
+    if (!fs->device || !fs->device->write || lba >= fs->device->sectors)
         return FS_ERR_IO;
     return fs->device->write(fs->device, lba, 1, fs->buffer) ? FS_ERR_IO : 0;
 }
@@ -252,12 +252,7 @@ int fs_file_read(PFS_FILE file, PVOID buffer, DWORD count, PDWORD read_count) {
             if (status==0)return FS_ERR_FORMAT;
             i++;
             cli=0;
-            file->volume->device->read(
-                file->volume->device,
-                cluster_to_lba(file->volume, c),
-                1,
-                file->volume->buffer
-            );
+            read_sector(file->volume,cluster_to_lba(file->volume,c));
         }
         *(buf+cnt)=*(file->volume->buffer+cli);
         cli++;
@@ -383,4 +378,125 @@ int raw_read(PFS_VOLUME fs, PVOID buffer, DWORD cluster, DWORD sector_count) {
         next_cluster(fs, c, &c);
     }
     return 0;
+}
+int fs_sync(PFS_VOLUME fs) {
+    if (!fs || !fs->mounted)return FS_ERR_NOT_MOUNTED;
+    if (!fs->device || !fs->device->flush)return FS_ERR_IO;
+    return fs->device->flush(fs->device) ? FS_ERR_IO : 0;
+}
+
+int get_fat(PFS_VOLUME fs, DWORD cluster, PDWORD value) {
+    if (!fs || !fs->mounted)return FS_ERR_NOT_MOUNTED;
+    if (!fs->device || !fs->device->read)return FS_ERR_IO;
+    if (!value)return FS_ERR_ARGUMENT;
+    //if (!valid_cluster(fs,cluster))return FS_ERR_RANGE;
+    QWORD lba=(QWORD)fs->fat_lba+(cluster>>7);
+    DWORD offset=(cluster&0x7f)<<2;
+    int err=read_sector(fs,lba);
+    if (err)return err;
+    *value=read32(fs->buffer+offset)&0xfffffff;
+    return 0;
+}
+int set_fat(PFS_VOLUME fs, DWORD cluster, PCDWORD value) {
+    if (!fs || !fs->mounted)return FS_ERR_NOT_MOUNTED;
+    if (!fs->device || !fs->device->flush)return FS_ERR_IO;
+    if (!value)return FS_ERR_ARGUMENT;
+    if (!valid_cluster(fs,cluster))return FS_ERR_RANGE;
+    QWORD lba=(QWORD)fs->fat_lba+(cluster>>7);
+    DWORD offset=(cluster&0x7f)<<2;
+    int err=read_sector(fs,lba);
+    if (err)return err;
+    DWORD tmp=*(PDWORD)(fs->buffer+offset) & 0xf0000000;
+    tmp|=*value&0xfffffff;
+    *(PDWORD)(fs->buffer+offset)=tmp;
+    return write_sector(fs,lba);
+}
+int find_free_cluser(PFS_VOLUME fs, PDWORD cluster) {
+    if (!fs||!fs->mounted)return FS_ERR_NOT_MOUNTED;
+    if (!fs->device || !fs->device->flush)return FS_ERR_IO;
+    if (!cluster)return FS_ERR_ARGUMENT;
+    for (DWORD c=2; (c-2) < fs->cluster_count; c++) {
+        DWORD value;
+        int err=get_fat(fs, c, &value);
+        if (err)return err;
+        if (value == 0) {
+            *cluster=c;
+            return 0;
+        }
+    }
+    return FS_ERR_NOFREE;
+}
+static int clear_cluster(PFS_VOLUME fs, DWORD cluster) {
+    if (!fs || !fs->mounted)return FS_ERR_NOT_MOUNTED;
+    if (!valid_cluster(fs,cluster))return FS_ERR_RANGE;
+    QWORD lba=cluster_to_lba(fs,cluster);
+    memzero(fs->buffer,fs->device->sector_size);
+    int err=write_sector(fs,lba);
+    if (err)return err;
+    return 0;
+}
+int free_clusters(PFS_VOLUME fs, DWORD first_cluster) {
+    if (!fs || !fs->mounted)return FS_ERR_NOT_MOUNTED;
+    if (!fs->device)return FS_ERR_IO;
+    DWORD c=first_cluster;
+    DWORD n=0;
+    const DWORD v=0; // zero
+    while (1) {
+        int status=next_cluster(fs,c,&n);
+        if (status<0)return status;
+        int err=set_fat(fs,c,&v);
+        if (err)return err;
+        if (status==0)return 0;
+        c=n;
+    }
+    return 0;
+}
+int alloc_clusters(
+    PFS_VOLUME fs,
+    DWORD count,
+    PDWORD first_cluster,
+    PDWORD last_cluster
+) {
+    if (!fs || !fs->mounted)return FS_ERR_NOT_MOUNTED;
+    if (!fs->device)return FS_ERR_IO;
+    if (!first_cluster || !last_cluster)return FS_ERR_ARGUMENT;
+    if (first_cluster==last_cluster)return FS_ERR_ARGUMENT;
+    if (count<=0)return FS_ERR_ARGUMENT;
+    DWORD h=0,t=0;
+    DWORD eoc=0xffffff8;
+    for (int i=0; i<count; i++) {
+        DWORD c=0;
+        int status=find_free_cluser(fs,&c);
+        if (status!=0) {
+            if (h) {
+                int err=free_clusters(fs,h);
+                if (err)return err;
+            }
+            return status;
+        }
+        int err=set_fat(fs,c,&eoc);
+        if (err)return err;
+        if (h==0) {
+            h=c;
+        } else {
+            err=set_fat(fs,t,&c);
+            if (err)return err;
+        }
+        t=c;
+    }
+    *first_cluster=h;
+    *last_cluster=t;
+    return 0;
+}
+int append_clusters(PFS_VOLUME fs, DWORD prev_t, DWORD next_h) {
+    if (!fs || !fs->mounted)return FS_ERR_NOT_MOUNTED;
+    if (!valid_cluster(fs, prev_t) ||
+        !valid_cluster(fs, next_h) ||
+        prev_t == next_h)
+        return FS_ERR_ARGUMENT;
+    DWORD v;
+    int err=get_fat(fs,prev_t,&v);
+    if (err!=0)return err;
+    if (v<0xffffff8)return FS_ERR_FORMAT;
+    return set_fat(fs,prev_t,&next_h);
 }

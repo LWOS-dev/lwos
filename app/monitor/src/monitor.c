@@ -248,6 +248,23 @@ static void execute(const char* str) {
                     dir_list(&monitor_fs, a);
                     break;
                 }
+                case 't': {
+                    if (!hex_parse(&str, &a)) {
+                        lw_puts("TRACE FAT CHAIN\n\r");
+                        return;
+                    }
+                    DWORD cc=a,cn=0;
+                    lw_put_dword(cc);
+                    lw_puts("\n\r");
+                    while (next_cluster(&monitor_fs,cc,&cn)==1) {
+                        lw_puts("  ->");
+                        lw_put_dword(cn);
+                        lw_puts("\n\r");
+                        cc=cn;
+                        cn=0;
+                    }
+                    break;
+                }
             }
             break;
         }
@@ -429,14 +446,16 @@ static void execute(const char* str) {
             break;
         }
         case '.': { // new function test
-            FS_FILE file;
-            DWORD dummy;
-            if (fs_file_open(&monitor_fs, "/boot.ini", &file)!=0) {
-                lw_puts("NOT FOUND\n\r");
-                return;
-            }
-            lw_puts("FOUND\n\r");
-            fs_file_read(&file, (PVOID)0x400000, file.length, &dummy);
+            DWORD c,d;
+            lw_puts("FREE CLUSTER AT ");
+            find_free_cluser(&monitor_fs,&c);
+            lw_put_dword(c);
+            lw_puts(" ALLOCATED AT ");
+            alloc_clusters(&monitor_fs,10,&c,&d);
+            lw_put_dword(c);
+            lw_puts(", END AT ");
+            lw_put_dword(d);
+            lw_puts("\n\r");
             break;
         }
     }
