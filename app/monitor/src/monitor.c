@@ -124,11 +124,11 @@ void edit_hex() {
     int col=0,line=0;
     int ptr=0;
     int bits=0; // 0none 1low4 2high4
-    int current_length=vi_file.length;
+    DWORD current_length=vi_file.length;
     BYTE db_tmp;
     DWORD offset=0;
     DWORD readcnt,writecnt;
-    int pos;
+    DWORD pos;
     int select=0;
     // 0 : offset
     // 1 : datas
@@ -200,7 +200,7 @@ void edit_hex() {
                     break;
                 }
             }
-            pos=col+line*16;
+            pos=offset+col+line*16;
             switch (bits) {
                 case 0: {
                     if (hex_digit(t)!=0xff) {
@@ -224,9 +224,12 @@ void edit_hex() {
                     }
                     if (t==VK_ENTER) {
                         bits=0;
-                        vi_buf[offset+col+line*16]=db_tmp;
+                        /* 跳过 EOF 编辑时，将中间空隙填零。 */
+                        if (pos>current_length)
+                            memzero(vi_buf+current_length,pos-current_length);
+                        vi_buf[pos]=db_tmp;
                         db_tmp=0;
-                        if (pos>=current_length)current_length=pos;
+                        if (pos>=current_length)current_length=pos+1;
                     }
                     break;
                 }
@@ -235,13 +238,32 @@ void edit_hex() {
         if (select==2) {
             switch (t) {
                 case VK_F1: {
-                    fs_file_seek(&vi_file,0,FS_SEEK_SET);
-                    fs_file_read(&vi_file,vi_buf,vi_file.length,&readcnt);
+                    readcnt=0;
+                    int err=fs_file_seek(&vi_file,0,FS_SEEK_SET);
+                    if (!err)
+                        err=fs_file_read(&vi_file,vi_buf,vi_file.length,&readcnt);
+                    if (!err && readcnt==vi_file.length)
+                        current_length=vi_file.length;
+                    putxy("                                                ",1,21);
+                    putxy(err || readcnt!=vi_file.length ? "LOAD FAILED" : "LOADED",1,21);
                     break;
                 }
                 case VK_F2: {
-                    fs_file_seek(&vi_file,0,FS_SEEK_SET);
-                    fs_file_write(&vi_file,vi_buf,current_length,&writecnt);
+                    /* length 由文件系统维护；编辑后的长度通过 count 传入。 */
+                    writecnt=0;
+                    int err=fs_file_seek(&vi_file,0,FS_SEEK_SET);
+                    if (!err)
+                        err=fs_file_write(&vi_file,vi_buf,current_length,&writecnt);
+                    if (!err && writecnt==current_length)
+                        err=fs_sync(&monitor_fs);
+                    putxy("                                                                ",1,21);
+                    putxy(err || writecnt!=current_length ? "SAVE FAILED" : "SAVED",1,21);
+                    putxy("ERR=",15,21);
+                    hex_xlat((DWORD)err,tstr_dw,8);
+                    putxy(tstr_dw,19,21);
+                    putxy("WRITTEN=",29,21);
+                    hex_xlat(writecnt,tstr_dw,8);
+                    putxy(tstr_dw,37,21);
                     break;
                 }
                 case VK_F3: {
@@ -270,13 +292,13 @@ void edit_hex() {
                 ptr=offset+i*16+j;
                 hex_xlat(vi_buf[i*16+j+offset], tstr_db, 2);
                 vi_attr=((col==j)&&(line==i))?((select==1)?0x70:0x07):0x08;
-                if (ptr>current_length) {
+                if ((DWORD)ptr>=current_length) {
                     putxy("   ", 10+j*3, 3+i);
                 } else {
                     putxy(tstr_db, 10+j*3, 3+i);
                     putxy(" ", 12+j*3, 3+i);
                 }
-                if (ptr==(col+line*16)) {
+                if ((DWORD)ptr==(offset+col+line*16)) {
                     if (bits==1) {
                         hex_xlat(db_tmp, tstr_db, 2);
                         tstr_db[0]=' ';

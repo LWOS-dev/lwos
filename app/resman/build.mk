@@ -4,13 +4,10 @@ RM_ELF := $(BIN_DIR)/resman.elf
 RM_BIN := $(BIN_DIR)/resman.bin
 RM_OBJS := $(BUILD_DIR)/$(RM_DIR)/head.o $(BUILD_DIR)/$(RM_DIR)/resman.o
 # resman 显式选择自己的库，使用 lib/build.mk 的 KERN 编译规则。
-# gfx 依赖 mem 的 memcpy，mem 的分配器依赖 bitmap。
+# 初始化内存页分配器和 GDT；图形、UI、鼠标由应用按需链接。
 RM_LIB_SRCS := mem.c \
-			   bitmap.c \
-			   gfx.c \
-			   ui.c \
-			   task.c \
-			   mouse.c
+               bitmap.c \
+               task.c
 RM_LIB_OBJS := $(RM_LIB_SRCS:%.c=$(BUILD_DIR)/lib/kern/%.o)
 
 $(BUILD_DIR)/$(RM_DIR)/%.o: $(RM_DIR)/src/%.c

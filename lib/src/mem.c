@@ -169,6 +169,9 @@ void kfree(PVOID ptr) {
             bitmap_clear_range(
                 &mem_bm, mem_pool[i].base, mem_pool[i].unit_size
             );
+            mem_pool[i].base=0;
+            mem_pool[i].unit_size=0;
+            return;
         }
     }
 }

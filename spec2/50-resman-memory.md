@@ -10,7 +10,10 @@ resman 是 v2 的内核层（[02](02-decisions.md) D2）。这一篇讲它的骨
 
 ## 现状
 
-`app/resman/` 下只有空的 `resman.h`、`resman.c`。
+`app/resman/` 已有预加载映像头、版本接口及 monitor 的调用/返回路径。
+初始化复用旧页分配器，复制 E820 并保留低 4 MiB；尚未完成公开 alloc/free、
+owner/tag 和按任务回收。monitor 也使用同一组固定地址分配元数据，所有权尚未统一。
+当前启动方式是 monitor 的 `rm` 命令，下面的 ATTACH RESMAN 路线仍是目标方案。
 
 ## 依赖
 

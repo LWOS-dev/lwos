@@ -2,45 +2,114 @@
 
 PSEG_DESC sys_gdt;
 GDTR sys_gdtr;
+PINT_DESC sys_idt;
+IDTR sys_idtr;
 
 void seg_xlat(PSMP_SEG dest, PSEG_DESC src) {
-    DWORD base=0,limit=0;
-    base=(((*(PQWORD)src)>>16)&0xFFFFFF) |
-        (((*(PQWORD)src)>>32)&0xFF000000);
-    limit=((*(PQWORD)src)&0xFFFF) | 
-        (((*(PQWORD)src)>>32)&0xF0000);
-    dest->base=base;
-    dest->limit=limit;
+    dest->base = src->base_low |
+                 ((DWORD)src->base_mid << 16) |
+                 ((DWORD)src->base_high << 24);
+    dest->limit = src->limit_low | ((DWORD)src->limit_high << 16);
+    dest->flag = src->access;
+    dest->attr = src->attr;
 }
+
 void seg_xlat_in(PSMP_SEG src, PSEG_DESC dest) {
-    *dest=
-        (((QWORD)(src->base)&0x00FFFFFF)<<16) |
-        (((QWORD)(src->base)&0xFF000000)<<32) |
-        (((QWORD)(src->limit)&0x0000FFFF)) |
-        (((QWORD)(src->limit)&0x000F0000)<<32) |
-        SEG_FLAGS | 
-        (((QWORD)(src->flag)&0xFF)<<40);
+    dest->base_low = (WORD)src->base;
+    dest->base_mid = (BYTE)(src->base >> 16);
+    dest->base_high = (BYTE)(src->base >> 24);
+    dest->limit_low = (WORD)src->limit;
+    dest->limit_high = src->limit >> 16;
+    dest->access = (BYTE)src->flag;
+    dest->attr = src->attr;
 }
+
 void seg_write(PSEG_DESC dest, DWORD base, DWORD limit, BYTE flags) {
-    *dest=
-        (((QWORD)base&0x00FFFFFF)<<16) |
-        (((QWORD)base&0xFF000000)<<32) |
-        (((QWORD)limit&0x0000FFFF)) |
-        (((QWORD)limit&0x000F0000)<<32) |
-        SEG_FLAGS | 
-        (((QWORD)flags&0xFF)<<40);
+    SMP_SEG segment = {
+        .base = base,
+        .limit = limit,
+        .flag = flags,
+        .attr = SEG_ATTR_32BIT | SEG_ATTR_PAGES,
+    };
+    seg_xlat_in(&segment, dest);
 }
-void gdt_update() {
-    asm volatile("lgdt %0" : : "m"(sys_gdtr));
+
+void gdt_update(void) {
+    asm volatile("lgdt %0" : : "m"(sys_gdtr) : "memory");
 }
-void gdt_init() {
-    sys_gdt=(PSEG_DESC)0x360000;
-    sys_gdtr.base=(DWORD)sys_gdt;
-    sys_gdtr.limit=(SEG_MAX<<3)-1;
-    memzero(sys_gdt, 0x10000);
-    *(PQWORD)(sys_gdt+1)=0x00cf9a000000ffff;
-    *(PQWORD)(sys_gdt+2)=0x00cf92000000ffff;
-    *(PQWORD)(sys_gdt+3)=0x00009a000000ffff;
-    *(PQWORD)(sys_gdt+4)=0x000092000000ffff;
+
+int find_free_gdt(void) {
+    /* 前五项是固定段；本函数只查找，不预留或修改槽位。 */
+    if (!sys_gdt) return -1;
+    for (int i = 5; i < SEG_MAX; i++) {
+        if (!(sys_gdt[i].access & 0x80)) return i;
+    }
+    return -1;
+}
+
+void gdt_init(void) {
+    sys_gdt = (PSEG_DESC)0x360000;
+    sys_gdtr.base = (DWORD)sys_gdt;
+    sys_gdtr.limit = SEG_MAX * sizeof(SEG_DESC) - 1;
+    memzero(sys_gdt, SEG_MAX * sizeof(SEG_DESC));
+
+    seg_write(sys_gdt + 1, 0, 0xfffff, GDT_ACC_CODE_RX);
+    seg_write(sys_gdt + 2, 0, 0xfffff, GDT_ACC_DATA_RW);
+
+    /* BIOS 跳板的 16 位段：字节粒度，D/B=0，与 stage2 一致。 */
+    SMP_SEG segment = {
+        .base = 0, .limit = 0xffff, .flag = GDT_ACC_CODE_RX, .attr = 0,
+    };
+    seg_xlat_in(&segment, sys_gdt + 3);
+    segment.flag = GDT_ACC_DATA_RW;
+    seg_xlat_in(&segment, sys_gdt + 4);
     gdt_update();
+}
+
+void int_xlat_read(PINT_DESC src, PSMP_INT dest) {
+    dest->offset = src->offset_low | ((DWORD)src->offset_high << 16);
+    dest->sel = src->sel;
+    dest->attr = src->attr;
+    dest->type = src->type;
+}
+
+void int_xlat_write(PINT_DESC dest, PSMP_INT src) {
+    /* 任务门不携带入口 offset；CS:EIP 由目标 TSS 提供。 */
+    DWORD offset = src->type == INT_TASK_GATE ? 0 : src->offset;
+    dest->offset_low = (WORD)offset;
+    dest->offset_high = (WORD)(offset >> 16);
+    dest->sel = src->sel;
+    dest->reserved = 0;
+    dest->attr = src->attr;
+    dest->type = src->type;
+}
+
+void idt_update(void) {
+    asm volatile("lidt %0" : : "m"(sys_idtr) : "memory");
+}
+
+void idt_init(void) {
+    /* 接管表的存储，暂时保留 monitor 的有效异常入口。
+     * 不把 offset=0 的占位门设为 present；专用入口可随后逐项替换。
+     */
+    IDTR previous;
+    asm volatile("sidt %0" : "=m"(previous) : : "memory");
+    sys_idt = (PINT_DESC)0x370000;
+    if (previous.base != (DWORD)sys_idt) {
+        DWORD bytes = (DWORD)previous.limit + 1;
+        DWORD capacity = INT_MAX * sizeof(INT_DESC);
+        if (bytes > capacity) bytes = capacity;
+        memzero(sys_idt, capacity);
+        memcpy(sys_idt, (PCVOID)previous.base, bytes);
+    }
+    sys_idtr.base = (DWORD)sys_idt;
+    sys_idtr.limit = INT_MAX * sizeof(INT_DESC) - 1;
+    idt_update();
+}
+
+void double_fault_init() {
+
+}
+void task_regsiter_load() {
+    
 }

@@ -7,7 +7,8 @@
 
 ## 现状
 
-- GDT 在 stage2 里，5 项，没有 TSS。
+- stage2 提供初始 GDT；RESMAN 首次进入时在 `0x360000` 建立并安装新 GDT，前五项与 stage2 一致，尚未安装 TSS。
+- `lib/include/task.h` 已有 TASK/TSS32 定义；创建、yield、退出和调度尚未实现。
 - IDT 在 monitor 里；PIC 未重映射且全部屏蔽；没有时钟。
 - 所有代码都在 ring 0。
 
