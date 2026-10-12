@@ -161,6 +161,7 @@ void seg_xlat_in(PSMP_SEG src, PSEG_DESC dest);
 void seg_write(PSEG_DESC dest, DWORD base, DWORD limit, BYTE flags);
 
 void double_fault_init(void);
-void task_regsiter_load(void);
+void task_register_load(void);
+int bootstrap_tss_init(void);
 
 #endif

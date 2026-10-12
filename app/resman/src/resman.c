@@ -20,16 +20,16 @@ int resman_main(PVOID *abi)
         mem_pool_init();
         gdt_init();
 
-        double_fault_init();
-        task_regsiter_load();
+        if (bootstrap_tss_init())return -1;
+        task_register_load();
 
         idt_init();
+        double_fault_init();
         initialized = 1;
     }
 
     // unfinished
 
-    /* IDT retains monitor handlers; tasks and timer are not started yet. */
     return RM_OK;
 }
 

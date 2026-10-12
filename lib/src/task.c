@@ -107,9 +107,72 @@ void idt_init(void) {
     idt_update();
 }
 
-void double_fault_init() {
+static TSS32 df_tss;
+static PVOID df_stack;
 
+extern void double_fault_entry(void);
+
+void double_fault_init() {
+    df_stack=kmalloc(8192);
+    if (!df_stack || df_stack==(PVOID)-1 || df_stack==(PVOID)-2)
+        return;
+    memzero(&df_tss, sizeof(df_tss));
+
+    df_tss.eip=(DWORD)double_fault_entry;
+    df_tss.esp=(DWORD)df_stack+8192;
+    df_tss.cs=0x08;
+    df_tss.ss=0x10;
+    df_tss.ds=0x10;
+    df_tss.es=0x10;
+    df_tss.fs=0x10;
+    df_tss.gs=0x10;
+    df_tss.eflags=0x02;
+    df_tss.ss0=0x10;
+    df_tss.esp0=df_tss.esp;
+    df_tss.cr3=0;
+    df_tss.ldt=0;
+    df_tss.iomap_base=sizeof(TSS32);
+
+    int df_index=find_free_gdt();
+    if (df_index<0)return;
+    SMP_SEG desc={
+        .base=(DWORD)&df_tss,
+        .limit=sizeof(TSS32)-1,
+        .flag=GDT_ACC_TSS32_AVAIL,
+        .attr=0,
+    };
+    seg_xlat_in(&desc,sys_gdt+df_index);
+
+    SMP_INT gate={
+        .sel=df_index*8,
+        .type=INT_TASK_GATE,
+        .attr=INT_RING_0,
+        .offset=0,
+    };
+    int_xlat_write(sys_idt+8,&gate);
 }
-void task_regsiter_load() {
-    
+
+static TASK task0;
+
+int bootstrap_tss_init() {
+    int index=find_free_gdt();
+    if (index<0)return -1;
+    memzero(&task0, sizeof(task0));
+    task0.id=0;
+    task0.state=TASK_RUNNING;
+    task0.tss_selector=index*8;
+    task0.tss.iomap_base=sizeof(TSS32);
+    task0.tss.ss0=0x10;
+    SMP_SEG desc={
+        .base=(DWORD)&task0.tss,
+        .limit=sizeof(TSS32)-1,
+        .flag=GDT_ACC_TSS32_AVAIL,
+        .attr=0,
+    };
+    seg_xlat_in(&desc,sys_gdt+index);
+    return 0;
+}
+void task_register_load(void) {
+    WORD sel=task0.tss_selector;
+    asm volatile ("ltr %0" : : "rm"(sel) : "memory");
 }

@@ -3,7 +3,7 @@
 Uses QEMU TCG, a snapshot and a temporary local QMP socket; no disk writes.
 Run after make: python3 tests/boot_test.py
 """
-import json, socket, subprocess, tempfile, time
+import json, re, socket, subprocess, tempfile, time
 from pathlib import Path
 root=Path(__file__).resolve().parent.parent
 for machine in ['pc','q35']:
@@ -93,7 +93,29 @@ for machine in ['pc','q35']:
             command(['v','x','ret'])
             if graphics_state() != 0:
                 raise RuntimeError(machine+' video trampoline exit failed')
-            print(f'PASS: {machine} boot; resman GDT; repeated resman call/return; video', flush=True)
+            # Force #DF only in the disposable guest: invalid NMI and #GP gates
+            # make exception delivery fail twice. The DF task gate stays intact.
+            def text_command(text):
+                command(['spc' if ch == ' ' else ch for ch in text] + ['ret'])
+            text_command('ow 00370012 0')  # NMI gate: null CS
+            text_command('ow 0037006a 0')  # #GP gate: null CS
+            qmp('inject-nmi')
+            time.sleep(.2)
+            if p.poll() is not None:
+                raise RuntimeError(machine+' exited while delivering double fault')
+            qmp('pmemsave', {'val': 0xb8000, 'size': 160,
+                'filename': str(work/'df-screen.bin')})
+            screen = (work/'df-screen.bin').read_bytes()[::2].decode('ascii', 'replace')
+            if 'DOUBLE FAULT (#DF) - SYSTEM HALTED' not in screen:
+                raise RuntimeError(machine+' DF entry did not run: '+screen)
+            qmp('pmemsave', {'val': rm_symbols['df_stack'], 'size': 4,
+                'filename': str(work/'df-stack.bin')})
+            stack = int.from_bytes((work/'df-stack.bin').read_bytes(), 'little')
+            registers = qmp('human-monitor-command', {'command-line': 'info registers'})
+            esp = int(re.search(r'ESP=([0-9a-fA-F]+)', registers).group(1), 16)
+            if not stack <= esp <= stack + 8192:
+                raise RuntimeError(machine+' DF did not use its emergency stack')
+            print(f'PASS: {machine} boot; repeated resman call/return; video; DF task gate and emergency stack', flush=True)
             qmp('quit'); p.wait(timeout=3)
         finally:
             if p.poll() is None: p.terminate();p.wait(timeout=3)
