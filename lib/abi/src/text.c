@@ -76,11 +76,35 @@ static void putc_raw(char c) {
         screen_scroll();
     }
 }
+void setcur(int is_open) {
+    outb(0x3D4, 0x0A);
+    unsigned char value = inb(0x3D5);
 
+    outb(0x3D4, 0x0A);
+    outb(0x3D5, is_open ? (value & ~0x20) : (value | 0x20));
+}
 void putc(char c) {
     get_cursor();
     putc_raw(c);
     set_cursor();
+}
+void put_dec(DWORD value) {
+    DWORD divisor = 1000000000;
+    int started = 0;
+
+    while (divisor)
+    {
+        DWORD digit = value / divisor;
+
+        if (digit || started || divisor == 1)
+        {
+            putc('0' + digit);
+            started = 1;
+        }
+
+        value %= divisor;
+        divisor /= 10;
+    }
 }
 void putca(char c) {
     if ((c >= 0x20) && ((unsigned char)c <= 0x7f)) {

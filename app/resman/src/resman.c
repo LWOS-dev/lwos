@@ -180,10 +180,9 @@ int resman_main(PVOID *abi)
     lw_put_dword(smp.base);
     lw_puts(" LIMIT=");
     lw_put_dword(smp.base+(smp.limit+1)<<12);
+    lw_puts("\n\r");
 
-    /*while (1);
-
-    return RM_OK;*/
+    return RM_OK;
     //暂时不用GUI
 
     if (lw_get_fb_bpp() != 32 || !lw_get_fb_w() || !lw_get_fb_h())

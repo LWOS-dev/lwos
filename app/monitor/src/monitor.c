@@ -3,6 +3,7 @@
 #include "ctx.h"
 #include "eth_tmp.h"
 #include "fs_monitor.h"
+#include "keys.h"
 
 // headers from common libraries
 #include "mem.h"
@@ -51,6 +52,7 @@ void help() {
     lw_puts("rm                      Start preloaded RESMAN and return\n\r");
     lw_puts("cb/s                    Clear buffer/screen\n\r");
     lw_puts("tb                      Type down buffer\n\r");
+    lw_puts("tf                      Create file at buffered path (with parents)\n\r");
     lw_puts("sb                      Show buffer\n\r");
     lw_puts("br/bw    [devidx] [lba] Block device operation\n\r");
     lw_puts("         [addr] [count]\n\r");
@@ -102,7 +104,199 @@ static void start_resman(void)
     lw_put_dword((DWORD)result);
     lw_puts("\n\r");
 }
+FS_FILE vi_file;
+BYTE vi_attr;
+PBYTE vi_buf;
+PWORD video=(PVOID)0xb8000;
+void putxy(const char* str, int x, int y) {
+    const char* p=str;
+    int length=strlen(p);
+    for (int i=0; i<length; i++) {
+        *(video+x+y*80+i)=(((WORD)vi_attr)<<8)|(*(p+i));
+    }
+}
+void edit_hex() {
+    vi_buf=(PVOID)0x400000;
+    // monitor环境还没开启资源管理，可能没有写动态分配的必要
+    if (vi_buf==0)vi_buf=(PVOID)0x400000;
+    int loop=1;
+    int t;
+    int col=0,line=0;
+    int ptr=0;
+    int bits=0; // 0none 1low4 2high4
+    int current_length=vi_file.length;
+    BYTE db_tmp;
+    DWORD offset=0;
+    DWORD readcnt,writecnt;
+    int pos;
+    int select=0;
+    // 0 : offset
+    // 1 : datas
+    // 2 : ctrls
+    char tstr_dw[9];
+    char tstr_db[3];
+    lw_setcur(0);
+    lw_screen_clear();
+    for (int i=0; i<80; i++) {
+        *(video+i)=0x7000;
+    }
+    vi_attr=0x70;
+    putxy("PRESS ANYKEY TO CONTINUE", 26, 12);
+    putxy("LWREAL HEX EDITOR V1.0\0", 3, 0);
+    vi_attr=0x07;
+    while (loop) {
 
+        t=lw_getk();
+        vi_attr=0x07;
+        putxy("LENGTH=", 20, 1);
+        hex_xlat(current_length, tstr_dw, 8);
+        putxy(tstr_dw, 27, 1);
+        switch (t) {
+            case VK_TAB: {
+                select++;
+                select%=3;
+                db_tmp=0;
+                bits=0;
+                break;
+            }
+            case VK_ESC: {
+                //return;
+                break;
+            }
+        }
+        if (select==0 || select==1) {
+            switch (t) {
+                case VK_PGUP: {
+                    offset-=0x100;
+                    if ((int)offset<=0)offset=0;
+                    break;
+                }
+                case VK_PGDN: {
+                    offset+=0x100;
+                    break;
+                }
+            }
+        }
+        if (select==1) {
+            switch (t) {
+                case VK_UP: {
+                    if (line<=0)break;
+                    line--;
+                    break;
+                }
+                case VK_DOWN: {
+                    if (line>=15)break;
+                    line++;
+                    break;
+                }
+                case VK_LEFT: {
+                    if (col<=0)break;
+                    col--;
+                    break;
+                }
+                case VK_RIGHT: {
+                    if (col>=15)break;
+                    col++;
+                    break;
+                }
+            }
+            pos=col+line*16;
+            switch (bits) {
+                case 0: {
+                    if (hex_digit(t)!=0xff) {
+                        db_tmp=hex_digit(t);
+                        bits=1;
+                    }
+                    break;
+                }
+                case 1: {
+                    if (hex_digit(t)!=0xff) {
+                        db_tmp=db_tmp<<4;
+                        db_tmp|=hex_digit(t)&0xf;
+                        bits=2;
+                    }
+                    break;
+                }
+                case 2: {
+                    if (t==VK_ESC) {
+                        bits=0;
+                        db_tmp=0;
+                    }
+                    if (t==VK_ENTER) {
+                        bits=0;
+                        vi_buf[offset+col+line*16]=db_tmp;
+                        db_tmp=0;
+                        if (pos>=current_length)current_length=pos;
+                    }
+                    break;
+                }
+            }
+        }
+        if (select==2) {
+            switch (t) {
+                case VK_F1: {
+                    fs_file_seek(&vi_file,0,FS_SEEK_SET);
+                    fs_file_read(&vi_file,vi_buf,vi_file.length,&readcnt);
+                    break;
+                }
+                case VK_F2: {
+                    fs_file_seek(&vi_file,0,FS_SEEK_SET);
+                    fs_file_write(&vi_file,vi_buf,current_length,&writecnt);
+                    break;
+                }
+                case VK_F3: {
+                    loop=0;
+                    break;
+                }
+            }
+        }
+        vi_attr=(select==0)?0x70:0x07;
+        hex_xlat(offset, tstr_dw, 8);
+        putxy("OFFSET=", 1, 1);
+        putxy(tstr_dw, 8, 1);
+        
+        for (int i=0; i<16; i++) {
+            vi_attr=(i==col)?0x0f:0x07;
+            putxy("+", 10+i*3, 2);
+            hex_xlat(i, tstr_db, 1);
+            tstr_db[1]=0;
+            putxy(tstr_db, 11+i*3, 2);
+        }
+
+        vi_attr=(select==2)?0x07:0x08;
+        putxy("F1=LOAD  F2=SAVE  F3=EXIT", 1, 24);
+        for (int i=0; i<16; i++) {
+            for (int j=0; j<16; j++) {
+                ptr=offset+i*16+j;
+                hex_xlat(vi_buf[i*16+j+offset], tstr_db, 2);
+                vi_attr=((col==j)&&(line==i))?((select==1)?0x70:0x07):0x08;
+                if (ptr>current_length) {
+                    putxy("   ", 10+j*3, 3+i);
+                } else {
+                    putxy(tstr_db, 10+j*3, 3+i);
+                    putxy(" ", 12+j*3, 3+i);
+                }
+                if (ptr==(col+line*16)) {
+                    if (bits==1) {
+                        hex_xlat(db_tmp, tstr_db, 2);
+                        tstr_db[0]=' ';
+                        putxy(tstr_db, 10+j*3, 3+i);
+                        putxy("*", 12+j*3, 3+i);
+                    }
+                    if (bits==2) {
+                        hex_xlat(db_tmp, tstr_db, 2);
+                        putxy(tstr_db, 10+j*3, 3+i);
+                        putxy("*", 12+j*3, 3+i);
+                    }
+                }
+            }
+            vi_attr=(i==line)?0x0f:0x07;
+            hex_xlat(offset+i*16, tstr_dw, 8);
+            putxy(tstr_dw, 1, 3+i);
+        }
+    }
+    fs_file_close(&vi_file);
+}
 static void execute(const char* str) {
     char c0;
     char c1;
@@ -153,6 +347,21 @@ static void execute(const char* str) {
         }
         case 't': {
             switch (c1) {
+                case 'f': {
+                    if (vi_file.opened) {
+                        lw_puts("CLOSE EDITOR FILE FIRST\n\r");
+                        break;
+                    }
+                    int err = fs_touch(&monitor_fs, var_path);
+                    lw_puts(err ? "CREATE FILE FAILED: " : "FILE READY: ");
+                    lw_puts(var_path);
+                    if (err) {
+                        lw_puts(" ERRLV=");
+                        lw_put_dword(err);
+                    }
+                    lw_puts("\n\r");
+                    break;
+                }
                 case 'b': {
                     memzero(var_path, 256);
                     int n=0;
@@ -445,17 +654,36 @@ static void execute(const char* str) {
             }
             break;
         }
+        case 'e': {
+            if (!c1) {
+                lw_puts("eh EDIT HEX FILE\n\r");
+                lw_puts("ep EDIT PLAIN TEXT\n\r");
+                return;
+            }
+            switch (c1) {
+                case 'h': {
+                    int err=fs_file_open(&monitor_fs, var_path, &vi_file);
+                    lw_puts("EDIT HEX FILE : ");
+                    lw_puts(var_path);
+                    lw_puts(" ERRLV=");
+                    lw_put_dword(err);
+                    lw_puts("\n\r");
+                    if (err) {
+                        lw_puts("FAIL\n\r");
+                        return;
+                    }
+                    lw_puts("FILE SIZE=");
+                    lw_put_dword(vi_file.length);
+                    lw_puts("\n\r");
+                    lw_getc();
+                    edit_hex();
+                    break;
+                }
+            }
+            break;
+        }
         case '.': { // new function test
-            DWORD c,d;
-            lw_puts("FREE CLUSTER AT ");
-            find_free_cluser(&monitor_fs,&c);
-            lw_put_dword(c);
-            lw_puts(" ALLOCATED AT ");
-            alloc_clusters(&monitor_fs,10,&c,&d);
-            lw_put_dword(c);
-            lw_puts(", END AT ");
-            lw_put_dword(d);
-            lw_puts("\n\r");
+            memcpy(var_path, "/boot.ini\0", 10);
             break;
         }
     }

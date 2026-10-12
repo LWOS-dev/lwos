@@ -43,6 +43,7 @@ enum {
     LW_SLOT_CONSOLE_GETK        = 0x1b,
     LW_SLOT_CONSOLE_GETC        = 0x1c,
     LW_SLOT_CONSOLE_GETP        = 0x1d,
+    LW_SLOT_CONSOLE_SET_CUR     = 0x1e,
 
     // devices
     // not out dx, al because this way may
@@ -106,9 +107,11 @@ extern PVOID *lw_abi_base;
 #define lw_put_qword    LW_CALL(LW_SLOT_CONSOLE_PUT_QWORD,  void (*)(QWORD))
 #define lw_screen_clear LW_CALL(LW_SLOT_CONSOLE_CLEAR,      void (*)(void))
 #define lw_dump128      LW_CALL(LW_SLOT_CONSOLE_DUMP128,    void (*)(PVOID))
+#define lw_put_dec32    LW_CALL(LW_SLOT_CONSOLE_PUT_DEC32,  void (*)(DWORD))
 #define lw_getk         LW_CALL(LW_SLOT_CONSOLE_GETK,       int (*)(void))
 #define lw_getc         LW_CALL(LW_SLOT_CONSOLE_GETC,       char (*)(void))
 #define lw_getp         LW_CALL(LW_SLOT_CONSOLE_GETP,       DWORD (*)(void))
+#define lw_setcur       LW_CALL(LW_SLOT_CONSOLE_SET_CUR,    void (*)(int))
 
 #define lw_outb         LW_CALL(LW_SLOT_IO_OUTB,            void (*)(WORD, BYTE))
 #define lw_outw         LW_CALL(LW_SLOT_IO_OUTW,            void (*)(WORD, WORD))

@@ -1,6 +1,7 @@
 #include "convert.h"
 #include "string.h"
 
+const char _hex_digit[17]="0123456789ABCDEF";
 BYTE hex_digit(char c) {
     char v=c;
     if ((v&0xf0)==0x30)return v&0xf;
@@ -27,4 +28,11 @@ int hex_parse(PPCSTR p, PDWORD out) {
     *p=s;
     *out=v;
     return 1;
+}
+void hex_xlat(QWORD in, PSTR out, int digits) {
+    int i=0;
+    for (; i<digits; i++) {
+        out[i]=_hex_digit[(in>>((digits-i-1)*4))&0xf];
+    }
+    out[++i]=0;
 }

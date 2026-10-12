@@ -5,5 +5,6 @@
 
 BYTE hex_digit(char c);
 int hex_parse(PPCSTR p, PDWORD out);
+void hex_xlat(QWORD in, PSTR out, int digits);
 
 #endif

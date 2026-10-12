@@ -99,6 +99,44 @@ int main(void) {
     fixture(&fs); fs.fat_mirrored=0; fs.fat_lba=2;
     DWORD v=0xfffffff;
     CHECK(set_fat(&fs,3,&v)==0 && get32(disk[1]+12)==0 && get32(disk[2]+12)==v);
-    printf("PASS: directory create/update/delete, growth, terminators, FAT copies and I/O errors\n");
+    /* touch: 逐级 mkdir，点目录项，空文件及已有文件不截断。 */
+    fixture(&fs);
+    CHECK(fs_touch(&fs,"/WORK/LOG/NEW.TXT")==0);
+    CHECK(fs_lookup(&fs,"/WORK",&e)==0 && e.attr==0x10 && e.cluster==3);
+    CHECK(disk[4][0]=='.' && disk[4][11]==0x10 && disk[4][26]==3);
+    CHECK(disk[4][32]=='.' && disk[4][33]=='.' && disk[4][58]==0);
+    CHECK(fs_lookup(&fs,"/WORK/LOG",&e)==0 && e.cluster==4);
+    CHECK(disk[5][26]==4 && disk[5][58]==3 && disk[5][43]==0x10);
+    CHECK(fs_lookup_entry(&fs,"/WORK/LOG/NEW.TXT",&e,&pos)==0);
+    CHECK(!e.length && !e.cluster && pos.lba==5 && pos.pos==64);
+    CHECK(get32(disk[1]+20)==0); /* 空文件不分配数据簇。 */
+    FS_FILE file={0}; DWORD n;
+    CHECK(fs_file_open(&fs,"/WORK/LOG/NEW.TXT",&file)==0);
+    CHECK(fs_file_write(&file,"hello",5,&n)==0 && n==5);
+    CHECK(fs_file_close(&file)==0);
+    int old_writes=writes;
+    CHECK(fs_touch(&fs,"work//log/new.txt")==0 && writes==old_writes);
+    CHECK(fs_lookup(&fs,"/WORK/LOG/NEW.TXT",&e)==0 && e.length==5);
+    CHECK(fs_touch(&fs,"/WORK/LOG")==FS_ERR_IS_DIR);
+    CHECK(fs_touch(&fs,"/WORK/LOG/NEW.TXT/CHILD")==FS_PATH_ERROR);
+    CHECK(fs_touch(&fs,"/X/INVALIDNAME.TXT")==FS_PATH_ERROR);
+    CHECK(fs_lookup(&fs,"/X",&e)==FS_PATH_ERROR);
+    CHECK(fs_touch(&fs,"/X/")==FS_PATH_ERROR);
+    CHECK(fs_touch(&fs,"/X/../A")==FS_PATH_ERROR);
+    CHECK(fs_touch(&fs,"/")==FS_PATH_ERROR);
+    CHECK(fs_touch(&fs,0)==FS_ERR_ARGUMENT);
+    fixture(&fs); full_root();
+    CHECK(fs_touch(&fs,"/PARENT/FILE.TXT")==0); /* 父目录扩展 */
+    CHECK(fs_lookup(&fs,"/PARENT/FILE.TXT",&e)==0 && !e.length);
+    fixture(&fs);
+    for(DWORD c=3;c<10;c++)fat(c,0xfffffff);
+    CHECK(fs_touch(&fs,"/PARENT/FILE.TXT")==FS_ERR_NOFREE);
+    CHECK(fs_lookup(&fs,"/PARENT",&e)==FS_PATH_ERROR);
+    fixture(&fs); fail_at=3; /* 子目录初始化数据写失败。 */
+    CHECK(fs_touch(&fs,"/PARENT/FILE.TXT")==FS_ERR_IO);
+    CHECK(disk[3][0]==0 && get32(disk[1]+12)==0);
+    fixture(&fs); flush_fail=1;
+    CHECK(fs_touch(&fs,"/PARENT/FILE.TXT")==FS_ERR_IO && disk[3][0]==0);
+    printf("PASS: directory mutations, recursive touch, FAT copies and I/O errors\n");
     return 0;
 }

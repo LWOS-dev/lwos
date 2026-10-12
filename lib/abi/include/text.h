@@ -16,7 +16,9 @@ void put_byte(BYTE v);
 void put_word(WORD v);
 void put_dword(DWORD v);
 void put_qword(QWORD v);
+void put_dec(DWORD value);
 void dump128(PVOID src);
+void setcur(int is_open);
 
 // in
 int getk(void);

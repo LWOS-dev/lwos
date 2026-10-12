@@ -42,11 +42,13 @@ const PVOID lw_abi[LW_SLOT_COUNT] __attribute__((section(".abi"), used, aligned(
     [LW_SLOT_CONSOLE_PUT_WORD]  = (PVOID)put_word,
     [LW_SLOT_CONSOLE_PUT_DWORD] = (PVOID)put_dword,
     [LW_SLOT_CONSOLE_PUT_QWORD] = (PVOID)put_qword,
+    [LW_SLOT_CONSOLE_PUT_DEC32] = (PVOID)put_dec,
     [LW_SLOT_CONSOLE_CLEAR]     = (PVOID)screen_clear,
     [LW_SLOT_CONSOLE_DUMP128]   = (PVOID)dump128,
     [LW_SLOT_CONSOLE_GETK]      = (PVOID)getk,
     [LW_SLOT_CONSOLE_GETC]      = (PVOID)getc,
     [LW_SLOT_CONSOLE_GETP]      = (PVOID)kbd_poll,
+    [LW_SLOT_CONSOLE_SET_CUR]   = (PVOID)setcur,
 
     [LW_SLOT_IO_OUTB]           = (PVOID)outb,
     [LW_SLOT_IO_OUTW]           = (PVOID)outw,

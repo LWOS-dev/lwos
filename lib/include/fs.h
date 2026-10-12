@@ -201,6 +201,11 @@ int dir_find_free(PFS_VOLUME fs, DWORD dir_cluster, PFEP_T pos);
  */
 int dir_create_entry(PFS_VOLUME fs, DWORD parent_cluster, PCSTR name83,
                      PSFT_T entry, PFEP_T pos);
+/* 创建空文件并递归补齐父目录（8.3，根目录相对路径，不支持 . / ..）。
+ * 已有普通文件保持不变；末尾为目录/斜杠则报错。不更新时间戳。
+ * 成功的新建操作已同步；失败可能保留已创建的父目录，不保证原子回滚。
+ */
+int fs_touch(PFS_VOLUME fs, PCSTR path);
 
 
 #endif

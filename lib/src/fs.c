@@ -746,8 +746,8 @@ static int valid_name83(PCSTR name) {
     return 1;
 }
 
-int dir_create_entry(PFS_VOLUME fs, DWORD parent_cluster, PCSTR name83,
-                     PSFT_T entry, PFEP_T pos) {
+static int create_entry(PFS_VOLUME fs, DWORD parent_cluster, PCSTR name83,
+                        BYTE attr, DWORD first, PSFT_T entry, PFEP_T pos) {
     int err = dir_write_ready(fs);
     if (err)return err;
     if (!name83 || !entry || !pos || !valid_name83(name83))
@@ -756,7 +756,8 @@ int dir_create_entry(PFS_VOLUME fs, DWORD parent_cluster, PCSTR name83,
     SFT_T created;
     memzero(&created, sizeof(created));
     memcpy(created.name, name83, 11);
-    created.attr = 0x20;
+    created.attr = attr;
+    created.cluster = first;
     SFT_T existing;
     FEP_T slot;
     int status = dir_find_entry(fs, parent_cluster, created.name,
@@ -792,7 +793,9 @@ int dir_create_entry(PFS_VOLUME fs, DWORD parent_cluster, PCSTR name83,
     memzero(e, 32);
     memcpy(e, created.name, 11);
     e[11] = created.attr;
-    // 等写好rtc再改回来，现在是1970.1.1
+    write16(e + 20, (WORD)(first >> 16));
+    write16(e + 26, (WORD)first);
+    /* 无 RTC 时使用 FAT 日期起点 1980-01-01。 */
     write16(e + 16, 0x21);
     write16(e + 18, 0x21);
     write16(e + 24, 0x21);
@@ -801,6 +804,103 @@ int dir_create_entry(PFS_VOLUME fs, DWORD parent_cluster, PCSTR name83,
     *entry = created;
     *pos = slot;
     return 0;
+}
+
+int dir_create_entry(PFS_VOLUME fs, DWORD parent_cluster, PCSTR name83,
+                     PSFT_T entry, PFEP_T pos) {
+    return create_entry(fs, parent_cluster, name83, 0x20, 0, entry, pos);
+}
+
+/* 调用者已检查重名；目录内容初始化落盘后才发布父目录项。 */
+static int create_directory(PFS_VOLUME fs, DWORD parent, PCSTR name83,
+                            PSFT_T out) {
+    int err = invalidate_fsinfo(fs);
+    if (err)return err;
+    DWORD first, last;
+    err = alloc_clusters(fs, 1, &first, &last);
+    if (err)return err;
+    memzero(fs->buffer, 512);
+    for (int i = 0; i < 2; i++) {
+        PBYTE e = fs->buffer + i * 32;
+        memcpy(e, i ? "..         " : ".          ", 11);
+        e[11] = 0x10;
+        DWORD c = i ? (parent == fs->root_cluster ? 0 : parent) : first;
+        write16(e + 20, (WORD)(c >> 16));
+        write16(e + 26, (WORD)c);
+        write16(e + 16, 0x21);
+        write16(e + 18, 0x21);
+        write16(e + 24, 0x21);
+    }
+    err = write_sector(fs, cluster_to_lba(fs, first));
+    if (!err)err = fs_sync(fs);
+    if (err) {
+        int cleanup = free_clusters(fs, first);
+        return cleanup ? cleanup : err;
+    }
+    FEP_T pos;
+    err = create_entry(fs, parent, name83, 0x10, first, out, &pos);
+    if (err) {
+        /* I/O 错误可能已发布目录项；此时不能释放其簇。 */
+        if (err != FS_ERR_IO) {
+            int cleanup = free_clusters(fs, first);
+            if (cleanup)return cleanup;
+        }
+        return err;
+    }
+    return fs_sync(fs);
+}
+
+int fs_touch(PFS_VOLUME fs, PCSTR path) {
+    int err = dir_write_ready(fs);
+    if (err)return err;
+    if (!path)return FS_ERR_ARGUMENT;
+    PCSTR start = path;
+    skip_ws(&start);
+    while (*start == '/')start++;
+    if (!*start)return FS_PATH_ERROR;
+
+    /* 先校验整条路径，避免因后面的非法名字创建半截目录。 */
+    PCSTR p = start;
+    CHAR name83[12];
+    for (;;) {
+        int length = 0;
+        while (p[length] && p[length] != '/') {
+            if (++length > 12)return FS_PATH_ERROR;
+        }
+        if (!make_name83(p, length, name83))return FS_PATH_ERROR;
+        p += length;
+        if (!*p)break;
+        while (*p == '/')p++;
+        if (!*p)return FS_PATH_ERROR; /* 必须以文件名结束。 */
+    }
+
+    DWORD parent = fs->root_cluster;
+    p = start;
+    for (;;) {
+        int length = 0;
+        while (p[length] && p[length] != '/')length++;
+        make_name83(p, length, name83);
+        p += length;
+        while (*p == '/')p++;
+        SFT_T entry;
+        FEP_T pos;
+        int status = dir_find_entry(fs, parent, name83, &entry, &pos, -1);
+        if (status < 0)return status;
+        if (!*p) {
+            if (status == FS_ENTRY_VALID)
+                return (entry.attr & 0x10) ? FS_ERR_IS_DIR : 0;
+            err = dir_create_entry(fs, parent, name83, &entry, &pos);
+            return err ? err : fs_sync(fs);
+        }
+        if (status == FS_ENTRY_VALID) {
+            if (!(entry.attr & 0x10))return FS_PATH_ERROR;
+            if (!valid_cluster(fs, entry.cluster))return FS_ERR_FORMAT;
+        } else {
+            err = create_directory(fs, parent, name83, &entry);
+            if (err)return err;
+        }
+        parent = entry.cluster;
+    }
 }
 
 /* I/O 失败后禁止继续使用旧缓存；关闭、检查卷并重新打开。 */
