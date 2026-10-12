@@ -30,10 +30,10 @@ static int test_read(PBLKDEV device, QWORD lba, DWORD count, PVOID out) {
     else if (lba == 2080) source = fat;
     else if (lba == 3680) source = root[0];
     else if (lba == 3681) source = root[1];
-    else if (lba == 3694) source = root[2];
+    else if (lba == 3687) source = root[2];
     else if (lba == 3695) source = root[3];
     else if (lba == 3690) source = subdir[0];
-    else if (lba == 3691) source = subdir[1];
+    else if (lba == 3685) source = subdir[1];
     if (!source)
         return -1;
     memcpy(out, source, 512);
@@ -52,10 +52,10 @@ static void fixture(void) {
     put32(mbr + 0x1be + 12, 200000);
     put16(boot + 510, 0xaa55);
     put16(boot + 11, 512);
-    boot[13] = 2; boot[16] = 2;
+    boot[13] = 1; boot[16] = 2;
     put16(boot + 14, 32);
     put32(boot + 36, 800);
-    put32(boot + 32, 200000);
+    put32(boot + 32, 90000);
     put32(boot + 44, 2);
     put32(fat + 2 * 4, 9); /* fragmented, two-cluster root directory */
     put32(fat + 9 * 4, 0x0fffffff);
@@ -86,7 +86,11 @@ int main(int argc, char **argv) {
     fixture();
     CHECK(fs_mount(&first, &device) == 0);
     CHECK(fs_mount(&second, &device) == 0);
-    CHECK(first.sectors_per_cluster == 2);
+    CHECK(first.sectors_per_cluster == 1);
+    boot[13] = 2;
+    CHECK(fs_mount(&first, &device) == FS_ERR_FORMAT);
+    boot[13] = 1;
+    CHECK(fs_mount(&first, &device) == 0);
     CHECK(fs_lookup(&first, "/res/readme.txt", &e) == 0);
     CHECK(e.cluster == 65538 && e.length == 1234 && e.attr == 0x20);
     CHECK(fs_lookup(&second, "RES//README.TXT", &e) == 0);

@@ -153,16 +153,53 @@ $(FS_TEST): tests/fs_test.c lib/src/fs.c lib/src/mem.c lib/src/string.c \
     lib/include/fs.h lib/include/mem.h lib/include/string.h \
     lib/include/stdint.h lib/include/dev/blockdev.h
 	@mkdir -p $(@D)
-	gcc -std=gnu11 -fno-builtin -Wall -Wextra -Ilib/include \
+	gcc -std=gnu11 -fno-builtin -ffunction-sections -fdata-sections \
+	    -Wl,--gc-sections -Wall -Wextra -Ilib/include \
 	    tests/fs_test.c lib/src/fs.c lib/src/mem.c lib/src/string.c -o $@
 
-test-fs: $(IMG) $(FS_TEST)
+FS_DIR_TEST = $(BUILD_DIR)/tests/fs_dir_test
+$(FS_DIR_TEST): tests/fs_dir_test.c lib/src/fs.c lib/src/mem.c lib/src/string.c \
+    lib/include/fs.h lib/include/mem.h lib/include/string.h \
+    lib/include/stdint.h lib/include/dev/blockdev.h
+	@mkdir -p $(@D)
+	gcc -std=gnu11 -fno-builtin -ffunction-sections -fdata-sections \
+	    -Wl,--gc-sections -Wall -Wextra -Ilib/include \
+	    tests/fs_dir_test.c lib/src/fs.c lib/src/mem.c lib/src/string.c -o $@
+
+test-fs-dir: $(FS_DIR_TEST)
+	$(FS_DIR_TEST)
+
+FS_FILE_TEST = $(BUILD_DIR)/tests/fs_file_test
+$(FS_FILE_TEST): tests/fs_file_test.c lib/src/fs.c lib/src/mem.c lib/src/string.c \
+    lib/include/fs.h lib/include/mem.h lib/include/string.h \
+    lib/include/stdint.h lib/include/dev/blockdev.h
+	@mkdir -p $(@D)
+	gcc -std=gnu11 -fno-builtin -ffunction-sections -fdata-sections \
+	    -Wl,--gc-sections -Wall -Wextra -Ilib/include \
+	    tests/fs_file_test.c lib/src/fs.c lib/src/mem.c lib/src/string.c -o $@
+
+test-fs-file: $(FS_FILE_TEST)
+	$(FS_FILE_TEST)
+
+FS_WRITE_TEST = $(BUILD_DIR)/tests/fs_write_test
+$(FS_WRITE_TEST): tests/fs_write_test.c lib/src/fs.c lib/src/mem.c lib/src/string.c \
+    lib/include/fs.h lib/include/mem.h lib/include/string.h \
+    lib/include/stdint.h lib/include/dev/blockdev.h
+	@mkdir -p $(@D)
+	gcc -std=gnu11 -fno-builtin -ffunction-sections -fdata-sections \
+	    -Wl,--gc-sections -Wall -Wextra -Ilib/include \
+	    tests/fs_write_test.c lib/src/fs.c lib/src/mem.c lib/src/string.c -o $@
+
+test-fs-write: $(FS_WRITE_TEST)
+	$(FS_WRITE_TEST)
+
+test-fs: $(IMG) $(FS_TEST) test-fs-dir test-fs-file test-fs-write
 	$(FS_TEST) $(IMG)
 
 clean:
 	rm -f $(IMG) $(DEMO_IMG_GZ)
 	rm -rf $(BUILD_DIR) $(BIN_DIR) $(FSROOT)
 
-.PHONY: all resetimg run clean fsroot webimg test-fs compdb
+.PHONY: all resetimg run clean fsroot webimg test-fs test-fs-dir test-fs-file test-fs-write compdb
 
 -include $(shell find $(BUILD_DIR) -name '*.d' 2>/dev/null)

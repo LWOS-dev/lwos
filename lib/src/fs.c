@@ -10,6 +10,14 @@ static WORD read16(PCBYTE p) {
 static DWORD read32(PCBYTE p) {
     return (DWORD)read16(p) | ((DWORD)read16(p + 2) << 16);
 }
+static void write16(PBYTE p, WORD v) {
+    p[0] = (BYTE)v;
+    p[1] = (BYTE)(v >> 8);
+}
+static void write32(PBYTE p, DWORD v) {
+    write16(p, (WORD)v);
+    write16(p + 2, (WORD)(v >> 16));
+}
 
 static int read_sector(PFS_VOLUME fs, QWORD lba) {
     if (!fs->device || !fs->device->read || lba >= fs->device->sectors)
@@ -143,7 +151,9 @@ static int make_name83(PCSTR src, int length, PSTR out) {
 }
 
 /* 第一版无当前工作目录, 相对和绝对路径都从卷根目录开始。 */
-int fs_lookup(PFS_VOLUME fs, PCSTR path, PSFT_T out) {
+/* pos 可为空; 非空时同时返回最终目录项的磁盘位置。 */
+static int lookup_impl(PFS_VOLUME fs, PCSTR path, PSFT_T out,
+                       PFEP_T pos, int missing_error) {
     if (!fs || !fs->mounted)
         return FS_ERR_NOT_MOUNTED;
     if (!path || !out)
@@ -154,6 +164,8 @@ int fs_lookup(PFS_VOLUME fs, PCSTR path, PSFT_T out) {
     while (*p == '/')
         p++;
     if (!*p) {
+        if (pos)
+            return FS_ERR_ARGUMENT; /* 根目录没有对应的父目录项。 */
         memzero(out, sizeof(*out));
         out->attr = 0x10;
         out->cluster = current;
@@ -176,19 +188,36 @@ int fs_lookup(PFS_VOLUME fs, PCSTR path, PSFT_T out) {
             next++;
         int directory = *next || *end == '/';
         SFT_T entry;
-        int status = dir_find(fs, current, name83, &entry,
-                              directory ? 1 : -1);
+        FEP_T entry_pos;
+        int status = pos
+            ? dir_find_entry(fs, current, name83, &entry, &entry_pos,
+                             directory ? 1 : -1)
+            : dir_find(fs, current, name83, &entry, directory ? 1 : -1);
         if (status < 0)
             return status;
         if (status == FS_ENTRY_END)
-            return FS_PATH_ERROR;
+            return missing_error;
         if (!*next) {
             *out = entry;
+            if (pos)
+                *pos = entry_pos;
             return 0;
         }
         current = entry.cluster;
         p = next;
     }
+}
+static int check_file(PFS_FILE file) {
+    if (!file || !file->opened)return FS_ERR_BAD_HANDLE;
+    if (file->write_failed)return FS_ERR_IO;
+    if (!file->volume || !file->volume->mounted)return FS_ERR_NOT_MOUNTED;
+    if (!file->volume->device || !file->volume->device->read)return FS_ERR_IO;
+    if (file->volume->sectors_per_cluster != 1)return FS_ERR_FORMAT;
+    if (file->position > file->length)return FS_ERR_RANGE;
+    return 0;
+}
+int fs_lookup(PFS_VOLUME fs, PCSTR path, PSFT_T out) {
+    return lookup_impl(fs, path, out, 0, FS_PATH_ERROR);
 }
 // 只是返回簇号，不构造文件指针
 int resolve_path(PFS_VOLUME fs, PCSTR path, PDWORD cluster) {
@@ -201,65 +230,76 @@ int resolve_path(PFS_VOLUME fs, PCSTR path, PDWORD cluster) {
     *cluster = entry.cluster;
     return 0;
 }
-// 构造出来这样的一个文件指针
+/* 所有检查成功后再提交句柄，失败不改变调用方状态。 */
 int fs_file_open(PFS_VOLUME fs, PCSTR path, PFS_FILE fp) {
-    if (!fp)
-        return FS_PATH_ERROR;
+    if (!fp)return FS_ERR_ARGUMENT;
+    if (fp->opened)return FS_ERR_BAD_HANDLE;
+    if (!path)return FS_ERR_ARGUMENT;
     SFT_T entry;
-    int status = fs_lookup(fs, path, &entry);
-    if (status)
-        return status;
-    fp->first_cluster = entry.cluster;
-    fp->attr = entry.attr;
-    fp->length = entry.length;
-    fp->current_cluster = 0;
-    fp->current_cluster_index = 0;
-    fp->opened = 0;
-    fp->position = 0;
-    fp->volume = fs;
+    int err = lookup_impl(fs, path, &entry, 0, FS_ERR_NOT_FOUND);
+    if (err)return err;
+    if (entry.attr & 0x10)return FS_ERR_IS_DIR;
+    if ((entry.cluster && !valid_cluster(fs, entry.cluster)) ||
+        (entry.length && !entry.cluster))return FS_ERR_FORMAT;
+    FS_FILE opened = {0};
+    opened.volume = fs;
+    opened.first_cluster = entry.cluster;
+    opened.length = entry.length;
+    opened.attr = entry.attr;
+    /* 保存目录项位置，供写入提交首簇和长度。 */
+    err = lookup_impl(fs, path, &entry, &opened.entry_pos, FS_ERR_NOT_FOUND);
+    if (err)return err;
+    opened.opened = 1;
+    *fp = opened;
+    return 0;
+}
+
+/* 将簇缓存定位到指定序号；不修改文件的字节位置。 */
+static int file_cluster(PFS_FILE file, DWORD target, PDWORD out) {
+    PFS_VOLUME fs = file->volume;
+    if (target >= fs->cluster_count)return FS_ERR_FORMAT;
+    DWORD c = file->first_cluster, index = 0;
+    if (file->current_cluster && file->current_cluster_index <= target) {
+        c = file->current_cluster;
+        index = file->current_cluster_index;
+    }
+    if (!valid_cluster(fs, c))return FS_ERR_FORMAT;
+    while (index < target) {
+        int status = next_cluster(fs, c, &c);
+        if (status < 0)return status;
+        if (!status)return FS_ERR_FORMAT;
+        index++;
+    }
+    file->current_cluster = c;
+    file->current_cluster_index = index;
+    *out = c;
     return 0;
 }
 
 int fs_file_read(PFS_FILE file, PVOID buffer, DWORD count, PDWORD read_count) {
-    PBYTE buf=buffer;
-    DWORD c=0,i=0;
-    DWORD cnt=0;
-    DWORD t=file->position/0x200;
-    WORD cli=file->position&0x1ff;
-    if (file->current_cluster&&file->current_cluster_index<t) {
-        c=file->current_cluster;
-        i=file->current_cluster_index;
-    } else {
-        c=file->first_cluster;
-        i=0;
+    if (read_count)*read_count = 0;
+    int err = check_file(file);
+    if (err)return err;
+    if (!read_count || (count && !buffer))return FS_ERR_ARGUMENT;
+    DWORD remaining = file->length - file->position;
+    if (remaining > count)remaining = count;
+    PBYTE dst = buffer;
+    while (remaining) {
+        DWORD c;
+        err = file_cluster(file, file->position / 512, &c);
+        if (err)return err;
+        err = read_sector(file->volume, cluster_to_lba(file->volume, c));
+        if (err)return err;
+        DWORD offset = file->position % 512;
+        DWORD amount = 512 - offset;
+        if (amount > remaining)amount = remaining;
+        memcpy(dst, file->volume->buffer + offset, amount);
+        dst += amount;
+        file->position += amount;
+        *read_count += amount;
+        remaining -= amount;
     }
-    while (i<t) {
-        int status=next_cluster(file->volume,c,&c);
-        if (status<0)return status;
-        if (status==0)return FS_ERR_FORMAT;
-        i++;
-    }
-    file->volume->device->read(
-        file->volume->device,
-        cluster_to_lba(file->volume, c),
-        1,
-        file->volume->buffer
-    );
-    for (cnt=0; cnt<count; cnt++) {
-        if (cli>=0x200) {
-            int status=next_cluster(file->volume,c,&c);
-            if (status<0)return status;
-            if (status==0)return FS_ERR_FORMAT;
-            i++;
-            cli=0;
-            read_sector(file->volume,cluster_to_lba(file->volume,c));
-        }
-        *(buf+cnt)=*(file->volume->buffer+cli);
-        cli++;
-    }
-    file->current_cluster=c;
-    file->current_cluster_index=i;
-    *read_count=cnt;
+    return 0;
 }
 
 int fs_mount(PFS_VOLUME fs, PBLKDEV device) {
@@ -303,7 +343,7 @@ int fs_mount(PFS_VOLUME fs, PBLKDEV device) {
     WORD flags = read16(fs->buffer + 0x28);
     BYTE active_fat = (flags & 0x80) ? (flags & 0x0f) : 0;
     QWORD overhead = (QWORD)reserved + (QWORD)fats * fat_size;
-    if (!spc || spc > 128 || (spc & (spc - 1)) || !fats || !reserved ||
+    if (spc != 1 || !fats || !reserved ||
         !fat_size || !total || total > part_sectors || overhead >= total ||
         active_fat >= fats || read16(fs->buffer + 0x11) || read16(fs->buffer + 0x16) ||
         read16(fs->buffer + 0x2a) || (QWORD)part_lba + total > 0x100000000ull)
@@ -316,53 +356,56 @@ int fs_mount(PFS_VOLUME fs, PBLKDEV device) {
     fs->cluster_count = clusters;
     fs->root_cluster = root;
     fs->fat_lba = part_lba + reserved + active_fat * fat_size;
+    fs->fat_base_lba = part_lba + reserved;
+    fs->fat_sectors = fat_size;
+    fs->fat_count = fats;
+    fs->fat_mirrored = !(flags & 0x80);
+    WORD info = read16(fs->buffer + 0x30);
+    fs->fsinfo_lba = (info && info < reserved) ? part_lba + info : 0;
     fs->data_lba = part_lba + (DWORD)overhead;
     fs->mounted = 1;
     return 0;
 }
 int fs_file_seek(PFS_FILE file, long long offset, int origin) {
+    int err = check_file(file);
+    if (err)return err;
+    long long base;
     switch (origin) {
-        case FS_SEEK_SET: {
-            if (offset<0)return FS_ERR_RANGE;
-            file->position=offset;
-            break;
-        }
-        case FS_SEEK_END: {
-            if (offset>0)return FS_ERR_RANGE;
-            if ((-offset)>file->length)return FS_ERR_RANGE;
-            file->position=file->length-1-offset;
-            break;
-        }
-        case FS_SEEK_CUR: {
-            if ((file->position+offset)>file->length ||
-                (file->position+offset)<0)return FS_ERR_RANGE;
-            file->position+=offset;
-            break;
-        }
-        default: {
-            return FS_ERR_BAD_HANDLE;
-            break;
-        }
+        case FS_SEEK_SET: base = 0; break;
+        case FS_SEEK_CUR: base = file->position; break;
+        case FS_SEEK_END: base = file->length; break;
+        default: return FS_ERR_ARGUMENT;
     }
+    /* 先比较再加法，避免 LLONG_MIN/LLONG_MAX 偏移造成溢出。 */
+    if (offset < -base || offset > (long long)file->length - base)
+        return FS_ERR_RANGE;
+    file->position = (DWORD)(base + offset);
+    file->current_cluster = 0;
+    file->current_cluster_index = 0;
+    return 0;
 }
 int fs_file_tell(PFS_FILE file, PDWORD position) {
-    if (!file)return FS_ERR_BAD_HANDLE;
-    *position=file->position;
+    int err = check_file(file);
+    if (err)return err;
+    if (!position)return FS_ERR_ARGUMENT;
+    *position = file->position;
     return 0;
 }
 int fs_file_size(PFS_FILE file, PDWORD length) {
-    if (!file)return FS_ERR_BAD_HANDLE;
-    *length=file->length;
+    int err = check_file(file);
+    if (err)return err;
+    if (!length)return FS_ERR_ARGUMENT;
+    *length = file->length;
     return 0;
 }
 int fs_file_eof(PFS_FILE file) {
-    if (!file)return FS_ERR_BAD_HANDLE;
-    if (file->position>file->length)return FS_ERR_RANGE;
-    return (file->position==file->length)?1:0;
+    int err = check_file(file);
+    if (err)return err;
+    return file->position == file->length;
 }
 int fs_file_close(PFS_FILE file) {
     if (!file)return FS_ERR_BAD_HANDLE;
-    memzero(file, sizeof(FS_FILE));
+    memzero(file, sizeof(*file));
     return 0;
 }
 int raw_read(PFS_VOLUME fs, PVOID buffer, DWORD cluster, DWORD sector_count) {
@@ -399,17 +442,25 @@ int get_fat(PFS_VOLUME fs, DWORD cluster, PDWORD value) {
 }
 int set_fat(PFS_VOLUME fs, DWORD cluster, PCDWORD value) {
     if (!fs || !fs->mounted)return FS_ERR_NOT_MOUNTED;
-    if (!fs->device || !fs->device->flush)return FS_ERR_IO;
+    if (!fs->device || !fs->device->write)return FS_ERR_IO;
     if (!value)return FS_ERR_ARGUMENT;
     if (!valid_cluster(fs,cluster))return FS_ERR_RANGE;
-    QWORD lba=(QWORD)fs->fat_lba+(cluster>>7);
     DWORD offset=(cluster&0x7f)<<2;
-    int err=read_sector(fs,lba);
-    if (err)return err;
-    DWORD tmp=*(PDWORD)(fs->buffer+offset) & 0xf0000000;
-    tmp|=*value&0xfffffff;
-    *(PDWORD)(fs->buffer+offset)=tmp;
-    return write_sector(fs,lba);
+    DWORD replacement = *value & 0x0fffffff;
+    DWORD copies = fs->fat_mirrored ? fs->fat_count : 1;
+    for (DWORD i = 0; i < copies; i++) {
+        QWORD base = fs->fat_mirrored
+            ? (QWORD)fs->fat_base_lba + (QWORD)i * fs->fat_sectors
+            : fs->fat_lba;
+        QWORD lba = base + (cluster >> 7);
+        int err = read_sector(fs, lba);
+        if (err)return err;
+        DWORD tmp = (read32(fs->buffer + offset) & 0xf0000000) | replacement;
+        write32(fs->buffer + offset, tmp);
+        err = write_sector(fs, lba);
+        if (err)return err;
+    }
+    return 0;
 }
 int find_free_cluser(PFS_VOLUME fs, PDWORD cluster) {
     if (!fs||!fs->mounted)return FS_ERR_NOT_MOUNTED;
@@ -499,4 +550,351 @@ int append_clusters(PFS_VOLUME fs, DWORD prev_t, DWORD next_h) {
     if (err!=0)return err;
     if (v<0xffffff8)return FS_ERR_FORMAT;
     return set_fat(fs,prev_t,&next_h);
+}
+
+int dir_entry_pos(
+    PFS_VOLUME fs, 
+    DWORD dir_cluster,
+    DWORD index, 
+    PFEP_T pos
+) {
+    if (!fs || !fs->mounted)return FS_ERR_NOT_MOUNTED;
+    if (!pos)return FS_ERR_ARGUMENT;
+    if (!valid_cluster(fs,dir_cluster))return FS_ERR_RANGE;
+    DWORD hops=index/16;
+    if (hops>=fs->cluster_count)return FS_ERR_RANGE;
+    DWORD c=dir_cluster;
+    for (int i=0; i<hops; i++) {
+        int status=next_cluster(fs,c,&c);
+        if (status<=0)return status;
+    }
+    pos->lba=cluster_to_lba(fs,c);
+    pos->pos=(index%16)*32;
+    return 1;
+}
+int dir_find_entry(
+    PFS_VOLUME fs,
+    DWORD dir_cluster,
+    PCSTR name83, 
+    PSFT_T out,
+    PFEP_T pos,
+    int is_dir
+) {
+    if (!fs || !fs->mounted)return FS_ERR_NOT_MOUNTED;
+    if (!name83 || !out || !pos)return FS_ERR_ARGUMENT;
+    if (!valid_cluster(fs,dir_cluster))return FS_ERR_FORMAT;
+    if (is_dir<-1 || is_dir>1)return FS_ERR_RANGE;
+    DWORD c=dir_cluster;
+    for (DWORD hops = 0; hops < fs->cluster_count; hops++) {
+        for (int i = 0; i < 16; i++) {
+            SFT_T entry;
+            int status = fat_read_fte(fs,c,i,&entry);
+            if (status<0 || status==FS_ENTRY_END)return status;
+            if (status!=FS_ENTRY_VALID)continue;
+            if (strncmp(entry.name,name83,11)!=0)continue;
+            if (is_dir>=0 &&
+                !!(entry.attr&0x10)!=is_dir)continue;
+            pos->lba=cluster_to_lba(fs,c);
+            pos->pos = (WORD)(i * 32);
+            *out=entry;
+            return FS_ENTRY_VALID;
+        }
+        int status=next_cluster(fs,c,&c);
+        if (status<=0)return status;
+    }
+    return FS_ERR_FORMAT;
+}
+int fs_lookup_entry(
+    PFS_VOLUME fs, 
+    PCSTR path,
+    PSFT_T entry, 
+    PFEP_T pos
+) {
+    if (!pos)
+        return FS_ERR_ARGUMENT;
+    return lookup_impl(fs, path, entry, pos, FS_PATH_ERROR);
+}
+
+/* 目录修改只接受由本卷查找得到的槽位；范围检查不能证明槽位归属。 */
+static int dir_write_ready(PFS_VOLUME fs) {
+    if (!fs || !fs->mounted)return FS_ERR_NOT_MOUNTED;
+    if (fs->sectors_per_cluster != 1)return FS_ERR_FORMAT;
+    if (!fs->device || !fs->device->read || !fs->device->write)
+        return FS_ERR_IO;
+    return 0;
+}
+
+static int dir_read_slot(PFS_VOLUME fs, const FEP_T *pos) {
+    int err = dir_write_ready(fs);
+    if (err)return err;
+    if (!pos)return FS_ERR_ARGUMENT;
+    if (pos->pos > 480 || pos->pos % 32 || pos->lba < fs->data_lba ||
+        pos->lba - fs->data_lba >= fs->cluster_count)
+        return FS_ERR_RANGE;
+    return read_sector(fs, pos->lba);
+}
+
+static int dir_regular_slot(PCBYTE e) {
+    if (!e[0] || e[0] == 0xe5)return FS_ERR_NOT_FOUND;
+    if ((e[11] & 0x0f) == 0x0f || (e[11] & 0x08))return FS_ERR_ARGUMENT;
+    if (e[11] & 0x10)return FS_ERR_IS_DIR;
+    if (e[11] & 0x01)return FS_ERR_READ_ONLY;
+    return 0;
+}
+
+int dir_update_entry(PFS_VOLUME fs, const FEP_T *pos,
+                     DWORD first_cluster, DWORD length) {
+    int err = dir_read_slot(fs, pos);
+    if (err)return err;
+    if ((first_cluster && !valid_cluster(fs, first_cluster)) ||
+        (!first_cluster && length))return FS_ERR_ARGUMENT;
+    PBYTE e = fs->buffer + pos->pos;
+    err = dir_regular_slot(e);
+    if (err)return err;
+    write16(e + 0x14, (WORD)(first_cluster >> 16));
+    write16(e + 0x1a, (WORD)first_cluster);
+    write32(e + 0x1c, length);
+    e[11] |= 0x20; /* ARCHIVE */
+    return write_sector(fs, pos->lba);
+}
+
+int dir_delete_entry(PFS_VOLUME fs, const FEP_T *pos) {
+    int err = dir_read_slot(fs, pos);
+    if (err)return err;
+    PBYTE e = fs->buffer + pos->pos;
+    err = dir_regular_slot(e);
+    if (err)return err;
+    e[0] = 0xe5;
+    return write_sector(fs, pos->lba);
+}
+
+/* 分配前使磁盘上的空闲计数失效，避免留下错误的已知计数。 */
+static int invalidate_fsinfo(PFS_VOLUME fs) {
+    int err;
+    if (!fs->fsinfo_lba)return 0;
+    err = read_sector(fs, fs->fsinfo_lba);
+    if (err)return err;
+    if (read32(fs->buffer) != 0x41615252 ||
+        read32(fs->buffer + 484) != 0x61417272 ||
+        read32(fs->buffer + 508) != 0xaa550000)return 0;
+    write32(fs->buffer + 488, 0xffffffffu);
+    write32(fs->buffer + 492, 0xffffffffu);
+    err = write_sector(fs, fs->fsinfo_lba);
+    return err ? err : fs_sync(fs);
+}
+
+int dir_find_free(PFS_VOLUME fs, DWORD dir_cluster, PFEP_T pos) {
+    int err = dir_write_ready(fs);
+    if (err)return err;
+    if (!pos)return FS_ERR_ARGUMENT;
+    if (!valid_cluster(fs, dir_cluster))return FS_ERR_RANGE;
+    DWORD c = dir_cluster;
+    for (DWORD hops = 0; hops < fs->cluster_count; hops++) {
+        QWORD lba = cluster_to_lba(fs, c);
+        err = read_sector(fs, lba);
+        if (err)return err;
+        for (WORD offset = 0; offset < 512; offset += 32) {
+            if (!fs->buffer[offset] || fs->buffer[offset] == 0xe5) {
+                pos->lba = lba;
+                pos->pos = offset;
+                return 0;
+            }
+        }
+        DWORD next;
+        int status = next_cluster(fs, c, &next);
+        if (status < 0)return status;
+        if (status == 1) {
+            c = next;
+            continue;
+        }
+        /* 先初始化新簇并同步，再让旧目录链引用它。 */
+        err = invalidate_fsinfo(fs);
+        if (err)return err;
+        DWORD first, last;
+        err = alloc_clusters(fs, 1, &first, &last);
+        if (err)return err;
+        err = clear_cluster(fs, first);
+        if (!err)err = fs_sync(fs);
+        if (err) {
+            int cleanup = free_clusters(fs, first);
+            return cleanup ? cleanup : err;
+        }
+        err = append_clusters(fs, c, first);
+        if (err)return err; /* 连接可能部分成功，不能盲目释放。 */
+        pos->lba = cluster_to_lba(fs, first);
+        pos->pos = 0;
+        return 0;
+    }
+    return FS_ERR_FORMAT;
+}
+
+/* 将严格的磁盘短名还原再编码，用既有规则校验，拒绝小写、点号和填充错误。 */
+static int valid_name83(PCSTR name) {
+    CHAR text[13], normalized[12];
+    int base = 8, ext = 3, n = 0;
+    while (base && name[base - 1] == ' ')base--;
+    while (ext && name[8 + ext - 1] == ' ')ext--;
+    if (!base)return 0;
+    for (int i = 0; i < base; i++)text[n++] = name[i];
+    if (ext) {
+        text[n++] = '.';
+        for (int i = 0; i < ext; i++)text[n++] = name[8 + i];
+    }
+    if (!make_name83(text, n, normalized))return 0;
+    for (int i = 0; i < 11; i++)
+        if (name[i] != normalized[i])return 0;
+    return 1;
+}
+
+int dir_create_entry(PFS_VOLUME fs, DWORD parent_cluster, PCSTR name83,
+                     PSFT_T entry, PFEP_T pos) {
+    int err = dir_write_ready(fs);
+    if (err)return err;
+    if (!name83 || !entry || !pos || !valid_name83(name83))
+        return FS_ERR_ARGUMENT;
+    /* 复制输入，避免后续读取覆盖调用方传入的卷缓冲区内容。 */
+    SFT_T created;
+    memzero(&created, sizeof(created));
+    memcpy(created.name, name83, 11);
+    created.attr = 0x20;
+    SFT_T existing;
+    FEP_T slot;
+    int status = dir_find_entry(fs, parent_cluster, created.name,
+                                &existing, &slot, -1);
+    if (status < 0)return status;
+    if (status == FS_ENTRY_VALID)return FS_ERR_EXISTS;
+    err = dir_find_free(fs, parent_cluster, &slot);
+    if (err)return err;
+    err = dir_read_slot(fs, &slot);
+    if (err)return err;
+    if (!fs->buffer[slot.pos]) {
+        if (slot.pos < 480) {
+            fs->buffer[slot.pos + 32] = 0;
+        } else {
+            /* 结束标记跨簇时，先提交后继标记，再覆盖原结束项。 */
+            DWORD c = (DWORD)(slot.lba - fs->data_lba) + 2, next;
+            status = next_cluster(fs, c, &next);
+            if (status < 0)return status;
+            if (status == 1) {
+                QWORD lba = cluster_to_lba(fs, next);
+                err = read_sector(fs, lba);
+                if (err)return err;
+                fs->buffer[0] = 0;
+                err = write_sector(fs, lba);
+                if (!err)err = fs_sync(fs);
+                if (err)return err;
+            }
+            err = dir_read_slot(fs, &slot);
+            if (err)return err;
+        }
+    }
+    PBYTE e = fs->buffer + slot.pos;
+    memzero(e, 32);
+    memcpy(e, created.name, 11);
+    e[11] = created.attr;
+    // 等写好rtc再改回来，现在是1970.1.1
+    write16(e + 16, 0x21);
+    write16(e + 18, 0x21);
+    write16(e + 24, 0x21);
+    err = write_sector(fs, slot.lba);
+    if (err)return err;
+    *entry = created;
+    *pos = slot;
+    return 0;
+}
+
+/* I/O 失败后禁止继续使用旧缓存；关闭、检查卷并重新打开。 */
+static int file_write_error(PFS_FILE file, int err) {
+    if (err == FS_ERR_IO)file->write_failed = 1;
+    return err;
+}
+
+int fs_file_write(PFS_FILE file, PCVOID buffer, DWORD count,
+                  PDWORD written_count) {
+    if (written_count)*written_count = 0;
+    int err = check_file(file);
+    if (err)return err;
+    if (!written_count || (count && !buffer))return FS_ERR_ARGUMENT;
+    PFS_VOLUME fs = file->volume;
+    if (file->attr & 1)return FS_ERR_READ_ONLY;
+    if (!fs->device->write || !fs->device->flush)return FS_ERR_IO;
+    if (count > 0xffffffffu - file->position)return FS_ERR_RANGE;
+    if (!count)return 0;
+
+    /* 不允许通过过时的句柄覆盖已被另一个操作更改的长度/首簇。 */
+    err = dir_read_slot(fs, &file->entry_pos);
+    if (err)return file_write_error(file, err);
+    PCBYTE e = fs->buffer + file->entry_pos.pos;
+    err = dir_regular_slot(e);
+    if (err)return err;
+    DWORD disk_first = (((DWORD)read16(e + 20) << 16) | read16(e + 26)) & 0x0fffffff;
+    if (disk_first != file->first_cluster || read32(e + 28) != file->length)
+        return FS_ERR_BAD_HANDLE;
+
+    PCBYTE src = buffer;
+    while (*written_count < count) {
+        DWORD index = file->position / 512, offset = file->position % 512;
+        DWORD c = 0, tail = 0, fresh = 0;
+        DWORD used = file->length / 512 + (file->length % 512 != 0);
+        if (index >= fs->cluster_count)return FS_ERR_NOFREE;
+        if (!file->first_cluster) {
+            if (file->length || file->position)return FS_ERR_FORMAT;
+        } else if (index < used || !index) {
+            err = file_cluster(file, index, &c);
+            if (err)return file_write_error(file, err);
+        } else {
+            /* 只在文件长度之外扩展；原长度以内的短链属于损坏。 */
+            err = file_cluster(file, index - 1, &tail);
+            if (err)return file_write_error(file, err);
+            int status = next_cluster(fs, tail, &c);
+            if (status < 0)return file_write_error(file, status);
+            if (!status)c = 0;
+        }
+        if (!c) {
+            err = invalidate_fsinfo(fs);
+            if (err)return file_write_error(file, err);
+            DWORD last;
+            err = alloc_clusters(fs, 1, &c, &last);
+            if (err)return file_write_error(file, err);
+            fresh = 1;
+        }
+        DWORD amount = 512 - offset;
+        if (amount > count - *written_count)amount = count - *written_count;
+        if (fresh)memzero(fs->buffer, 512);
+        else if (offset || amount != 512) {
+            err = read_sector(fs, cluster_to_lba(fs, c));
+            if (err)return file_write_error(file, err);
+        }
+        memcpy(fs->buffer + offset, src, amount);
+        err = write_sector(fs, cluster_to_lba(fs, c));
+        if (!err)err = fs_sync(fs); /* 数据先于新增引用/长度落盘。 */
+        if (err) {
+            if (fresh) {
+                int cleanup = free_clusters(fs, c); /* 尚未被文件引用。 */
+                if (cleanup)err = cleanup;
+            }
+            return file_write_error(file, err);
+        }
+        if (fresh && tail) {
+            err = append_clusters(fs, tail, c);
+            if (!err)err = fs_sync(fs);
+            if (err)return file_write_error(file, err); /* 不能盲目释放。 */
+        }
+        DWORD first = file->first_cluster ? file->first_cluster : c;
+        DWORD position = file->position + amount;
+        DWORD length = position > file->length ? position : file->length;
+        /* 即使长度未变，也更新 ARCHIVE 属性。 */
+        err = dir_update_entry(fs, &file->entry_pos, first, length);
+        if (!err)err = fs_sync(fs);
+        if (err)return file_write_error(file, err);
+        file->first_cluster = first;
+        file->length = length;
+        file->position = position;
+        file->attr |= 0x20;
+        file->current_cluster = c;
+        file->current_cluster_index = index;
+        *written_count += amount;
+        src += amount;
+    }
+    return 0;
 }
