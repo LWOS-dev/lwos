@@ -11,23 +11,36 @@
 内核与程序实现由人类手工编写；项目描述文件、文档（包括本 README）、宣传文案与宣传方式由 AI 生成。手写实现的声明适用于内核与程序代码，文档和宣传内容则在此明确标注其 AI 来源。文档中的设计与规划仍需对照实际代码确认。
 
 一个以手写内核、底层编程和独立程序开发为重心的业余操作系统，外观和操作感受受到 IBM-PC 启发。LWOS 希望为工具、编辑器、实验程序等提供运行环境，并逐步形成开放的软件生态。CNC（计算机数控）是应用方向之一，独立程序和社区软件无需与 CNC 有关。
-注意：LWOS在风格上类似IBM-PC，但是不依赖BIOS。固件支持（自定义BIOS、IBM兼容机）属于另一个独立项目，不是本项目范围内的。
+当前启动链使用 BIOS 获取 E820 内存信息、显示信息，并保留显示模式切换跳板；进入保护模式后，磁盘等运行时服务由项目自己的代码提供。自定义固件属于另一个独立项目，不在本项目范围内。
 
 > **状态:** LWOS在早期阶段正在积极重构。仓库正在从零开始重建和标准化，因此API、目录结构可能随时变更，不会通知，磁盘结构是FAT32+自制LOADER。
 
-## 目前可用的功能
+## 当前实现与开发重点
 
-- **MBR** — 用于引导系统盘和分区表。
-- **FAT32 (read-only)** — 简化版FAT32读取实现在loader里，以后会写高级的多级目录+读写。
-- **镜像制作** — 使用 `dosfstools` 的 `mkfs.fat` 和 `mtools` 的 `mcopy`，支持递归目录；安装这两个工具包后运行 `make`。FAT32 每扇区固定 512 字节、每簇 1 扇区。`resources/` 中的文件打包到镜像的 `/RES/`。原 `tools/mkfat` 保留作实验代码。
+以下状态依据 2026-10-13 的源码和构建配置整理，不代表所有功能都已完成运行验收。当前重点是**把原命令行中的 demo 和调试功能迁移到 monitor 的 TUI，最终弃用命令行**，同时明确 monitor 与 resman 的资源边界。
 
-其他内容（shell、实用工具等）还在规划中，没全实现。
+- **启动链**：MBR → STAGE2 → LOADER；按 `BOOT.INI` 加载 ABI、RESMAN、MONITOR 和字体。monitor 启动时调用 resman 初始化，返回后进入 TUI。
+- **monitor TUI**：已有内存读写和内存转储面板，支持地址输入及 BYTE/WORD/DWORD/QWORD 显示。PCI、文件编辑、网络调试等旧命令处理代码仍保留，尚未全部迁入 TUI；旧命令行不是当前启动后的交互入口。
+- **resman 基础**：已有 E820 副本、页分配器基础、GDT/256 项 IDT、任务 0 TSS 和 `ltr`；PIC 已重映射，IRQ1 经扫描码队列接入原 ABI 键盘接口。尚无任务创建、切换、PIT 调度和多任务 FPU 管理。
+- **磁盘与文件系统**：PIO ATA 已封装为 `BLKDEV`；运行时 FAT32 已有多级短文件名路径、文件读写、簇分配、目录项操作和文件创建。当前限 512 字节扇区、每簇 1 扇区、8.3 短文件名；写入失败不保证原子回滚。文件系统已接入启动挂载，相关操作界面仍在迁移。
+- **图形基础**：保留矩形、8×16 字体、后备缓冲和脏矩形代码；鼠标解包和矩形拖动代码也已存在，但尚未形成当前 TUI 下的图形窗口入口。
+- **工具与原型**：有 PCI 枚举/BAR 检查、临时网络收帧与内存调试代码，以及 ELF → LWP 初步打包工具。LWP 重定位加载、可靠网络传文件、AHCI 和 DLL 尚未接通；镜像中的 `TEST.EXE` 不代表运行时已能加载执行。
 
-## 正在规划的
+### monitor、resman 与 ABI 的边界
 
-- `MONITOR.BIN` — 仿照MS-DOS `DEBUG.COM`但是包含更多ABI的一个调试器
-- `EDIT.EXE` — 仿照MS-DOS `EDIT.COM`的文本编辑器
-- 关于设计、内存布局的存档
+| 层 | 当前掌握的状态或资源 | 尚在过渡的部分 |
+|---|---|---|
+| **MONITOR**（`app/monitor`） | TUI 面板、焦点和编辑状态；文件系统卷/文件句柄；调试上下文；自身栈。直接绘制 VGA 文本显存 | 启动时先装临时 IDT，resman 接管后保留 monitor 的 1/3/8 号入口；旧 demo 逐项迁入 TUI |
+| **RESMAN**（`app/resman`，按 KERN 编译） | 接管后的 GDT/IDT、异常分发、PIC、IRQ1 扫描码队列、任务 0 TSS；内存管理初始化 | 目前借用 monitor 的栈，初始化返回后中断服务继续有效；公开 alloc/free、资源 owner/tag、任务和映像加载服务尚未实现 |
+| **ABI / HAL**（`lib/abi`） | 端口 IO、PCI 配置访问、PIO ATA、块设备注册表、控制台/显示模式服务、键盘扫描码解码 | 输入源已可绑定到 resman 队列；设备表仍归 ABI，未实现 spec2 中由 resman 统一绑定和登记设备的方案 |
+
+内存所有权还没有收拢：monitor 与 resman 都链接并初始化同一套固定地址的页分配元数据，旧编辑器又使用 `0x400000` 固定缓冲。迁移界面时需要将这些缓冲与系统分配统一管理。monitor 的调试读写能力不等于它拥有被查看的内存或设备；系统资源的分配、生命周期和中断管理应逐步由 resman 提供服务，monitor 负责操作与展示。
+
+两者及 ABI 目前也都能写文本显存，尚无统一显示仲裁。TUI 是文本模式交互界面，不等于 spec2 中的图形窗口系统。详细代码对照见 [review 中的概览](review/spec2-overview-2026-10-13.md)；设计目标见 [spec2](spec2/00-index.md)。
+
+### 后续方向
+
+先完成 demo 的 TUI 迁移及资源归属整理，再逐步补齐 resman 内存服务、LWP 重定位加载和任务运行。独立编辑器、图形窗口、DLL、可靠网络传文件等仍属于后续工作；spec2 中的里程碑是目标，不能直接当作已完成功能。
 
 ## 开源、二次创作与软件生态
 
@@ -63,28 +76,31 @@ LWOS 重视手工编程，也欢迎大家在许可证允许的范围内修改、
     loader/   LOADER.BIN 与 BOOT.INI
     lib/      库；lib/include 为公开头文件（abi.h 等）
       abi/    ABI.BIN，src/ 与 include/（私有头）分开
-    app/      运行在 ABI 之上的程序（monitor、test1），各自 src/ 与 include/ 分开
+    app/      monitor、test1，以及按 KERN 编译的 resman
     build/    中间产物（.o/.d），bin/ 为成品
     fsroot/ 用于构建FAT32的暂用目录
     tools/  宿主机侧实用工具
-    report/ 评审笔记（review）
-    SPEC/   规格书
+    report/ 历史评审笔记
+    review/ 当前实现与 spec2 的对照概览
+    SPEC/   旧版规格存档
     spec2/  v2 规格书
     site/   lwos.dev 站点（Astro，独立于 OS 构建，见 site/README.md）
 
 ## 构建与运行
 
-要求：
+当前 makefile 使用：
 
-- 有 `make` 的 Unix 类环境
-- C 编译器
-- [QEMU](https://www.qemu.org/) or [Bochs](https://bochs.sourceforge.io/)
-
-在模拟器中构建并启动：
+- Unix 类环境、GNU Make、Python 3
+- NASM、GCC（支持 `-m32`，含 32 位 libgcc）、GNU binutils（`ld`、`objcopy`）
+- `dosfstools`（`mkfs.fat`）和 `mtools`（`mcopy`），以及 `dd`、`truncate` 等命令
+- Bochs：`make run` 使用仓库中的 `bochsrc` 启动
 
 ```sh
-make run
+make        # 构建 lwcnc.img 和编译命令索引
+make run    # 构建镜像并用 Bochs 启动
 ```
+
+镜像为 MBR + FAT32，构建时使用 512 字节扇区、每簇 1 扇区。`fsroot/` 是镜像暂存目录；`resources/` 的文件递归打包到镜像 `/RES/`。`tools/mkfat` 保留作实验代码，不是当前镜像制作路径。QEMU 也用于仓库的部分测试脚本，但 `make run` 不会自动选择 QEMU。
 
 ## 许可证
 

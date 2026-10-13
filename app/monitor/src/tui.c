@@ -1,5 +1,5 @@
-#include "tui.h"
-#include "keys.h"
+#include "../include/tui.h"
+#include "../include/keys.h"
 
 #include "abi.h"
 #include "string.h"
@@ -410,6 +410,10 @@ void tui_init() {
     lw_setcur(0);
     set_attr(TUI_BLACK,TUI_WHITE);
     putxy("LWOS MONITOR V1 TUI",2,0);
+    set_attr(TUI_WHITE,TUI_BLUE);
+    for (int i=0;i<160;i++) {
+        video[80*22+i]=vi_attr<<8;
+    }
 
     area_mem_reader.x=0;
     area_mem_reader.y=1;
@@ -428,6 +432,11 @@ void tui_init() {
 void tui_loop() {
     DWORD t=0;
     while (1) {
+        set_attr(TUI_WHITE,TUI_BLUE);
+        for (int i=0;i<80;i++) {
+            putxyc(' ',i,23);
+            putxyc(' ',i,24);
+        }
         switch (t) {
             case VK_TAB: {
                 focus++;
