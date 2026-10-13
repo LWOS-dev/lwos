@@ -17,6 +17,18 @@
 #define ST_TIMEO 0x40
 #define ST_PERR  0x80
 
+static LW_KBD_SOURCE input_source;
+
+int kbd_bind_source(const LW_KBD_SOURCE *source) {
+    if (!source || !source->read || !source->wait)return -1;
+    input_source=*source;
+    return 0;
+}
+
+void kbd_wait(void) {
+    if (input_source.wait)input_source.wait();
+}
+
 static int wait_write() {
     for (int i = 0; i < 100000; i++) {
         if ((inb(KBD_STAT) & ST_IBF) == 0) {
@@ -38,6 +50,7 @@ static int wait_read() {
 }
 
 void kbd_probe() {
+    if (input_source.read)return; /* RESMAN 接管后不再发探测命令。 */
     BYTE s = inb(KBD_STAT);
 
     puts("KERBOARD PROBE\n\r");
@@ -141,6 +154,7 @@ static int read_config(PBYTE out) {
 
 // re enable
 int kbd_enable() {
+    if (input_source.read)return 1;
     BYTE c;
 
     if (!read_config(&c)) {
@@ -173,7 +187,7 @@ int kbd_enable() {
     }*/
 
     c&=(BYTE)~0x10;
-    c|=0x40;
+    c|=0x41; /* Set-1 转换和 IRQ1，启动阶段 PIC 仍屏蔽。 */
 
     if (!write_config(c)) {
         puts("FAILED WRITE CONFIG\n\r");
@@ -282,6 +296,11 @@ void kbd_reset_state() {
 static void set_leds() {
     BYTE v = (BYTE)((scroll?1:0)|(num?2:0)|(caps?4:0));
 
+    if (input_source.read) {
+        if (input_source.set_leds)input_source.set_leds(v);
+        return;
+    }
+
     if (!wait_write())return;
     outb(KBD_DATA, 0xed);
     if (!wait_read())return;
@@ -374,6 +393,14 @@ int kbd_feed(BYTE sc) {
 }
 
 int kbd_poll() {
+    if (input_source.read) {
+        BYTE scan;
+        while (input_source.read(&scan)) {
+            int key=kbd_feed(scan);
+            if (key!=K_NONE)return key;
+        }
+        return K_NONE;
+    }
     BYTE s = inb(KBD_STAT);
     BYTE d;
 

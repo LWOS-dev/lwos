@@ -2,6 +2,7 @@
 #define _LW_KBD_H
 
 #include "io.h"
+#include "abi.h"
 
 void kbd_probe();
 int kbd_enable();
@@ -58,5 +59,7 @@ void kbd_reset_state();
 int kbd_feed(BYTE sc);
 int kbd_poll();
 BYTE kbd_mods();
+int kbd_bind_source(const LW_KBD_SOURCE *source);
+void kbd_wait(void);
 
 #endif

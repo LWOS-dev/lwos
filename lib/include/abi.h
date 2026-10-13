@@ -20,6 +20,13 @@
 #define LW_ABI_MAGIC 0x4241574cu    /* "LWAB" */
 #define LW_ABI_BASE  0x00100000u
 
+/* ABI 复制此后端：read 非阻塞读取扫描码，wait 等待输入，LED 在前台更新。 */
+typedef struct _LW_KBD_SOURCE {
+    int (*read)(PBYTE scan);
+    void (*wait)(void);
+    void (*set_leds)(BYTE value);
+} LW_KBD_SOURCE;
+
 enum {
     // description of the image
     LW_SLOT_MAGIC               = 0x00,
@@ -60,6 +67,7 @@ enum {
     LW_SLOT_IO_VIDEO_EXIT       = 0x29,
     LW_SLOT_IO_VIDEO_LIVE       = 0x2a,
     LW_SLOT_IO_FPU_INIT         = 0x2b,
+    LW_SLOT_IO_KBD_BIND_SOURCE  = 0x2c,
 
     LW_SLOT_INFO_FB             = 0x30,
     LW_SLOT_INFO_FB_W           = 0x31,
@@ -120,7 +128,8 @@ extern PVOID *lw_abi_base;
 #define lw_inw          LW_CALL(LW_SLOT_IO_INW,             WORD (*)(WORD))
 #define lw_inl          LW_CALL(LW_SLOT_IO_INL,             DWORD (*)(WORD))
 #define lw_kbd_probe    LW_CALL(LW_SLOT_IO_KBD_PROBE,       void (*)(void))
-#define lw_kbd_enable   LW_CALL(LW_SLOT_IO_KBD_ENABLE,      void (*)(void))
+#define lw_kbd_enable   LW_CALL(LW_SLOT_IO_KBD_ENABLE,      int (*)(void))
+#define lw_kbd_bind_source LW_CALL(LW_SLOT_IO_KBD_BIND_SOURCE, int (*)(const LW_KBD_SOURCE *))
 #define lw_gfx_enter    LW_CALL(LW_SLOT_IO_VIDEO_ENTER,     int (*)(void))
 #define lw_gfx_exit     LW_CALL(LW_SLOT_IO_VIDEO_EXIT,      void (*)(void))
 #define lw_gfx_is_live  LW_CALL(LW_SLOT_IO_VIDEO_LIVE,      int (*)(void))

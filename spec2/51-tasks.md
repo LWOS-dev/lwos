@@ -9,7 +9,9 @@
 
 - stage2 提供初始 GDT；RESMAN 首次进入时在 `0x360000` 建立并安装新 GDT，前五项与 stage2 一致，尚未安装 TSS。
 - `lib/include/task.h` 已有 TASK/TSS32 定义；创建、yield、退出和调度尚未实现。
-- IDT 在 monitor 里；PIC 未重映射且全部屏蔽；没有时钟。
+- RESMAN 已接管 256 项 IDT，共用 ISR stub/C 分发；向量 1/3 和 8 暂时保留 monitor 入口。
+- 当前执行流已有任务 0 TSS 和 `ltr`；任务创建/切换尚未实现。
+- PIC 已重映射，IRQ1 经队列接原 ABI 输入接口；其他 IRQ 屏蔽，没有时钟。专用 #DF 初始化停用。
 - 所有代码都在 ring 0。
 
 ## 依赖

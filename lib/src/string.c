@@ -83,3 +83,8 @@ CHAR to_upper(BYTE c) {
     if (c>='a'&&c<='z')return c-0x20;
     return c;
 }
+
+CHAR to_avail(BYTE c) {
+    if (c>=0x20 && c<=0x7f)return c;
+    return '.';
+}

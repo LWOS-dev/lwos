@@ -4,6 +4,18 @@
 
 ---
 
+## 2026-10-13  IRQ 键盘 / ABI 后端
+
+- 做到：IRQ1 收扫描码进环形队列，原 ABI getk/getc/getp 绑定此来源；空闲 HLT、LED ACK 与扫描码分离、ABI 再 attach 保留后端。make、宿主解码和 QEMU PC/Q35 键盘回归通过。
+- 下一步：多任务时将阻塞 getk 接任务等待队列；统一 PS/2 鼠标和键盘命令管理，再推进 PIT 与调度。
+- 坑：IRQ 中不解码/绘图；getk 在 IF=1 前台调用；原 getp 空输入继续返回 0xffffffff，队列溢出由 kb_dropped 计数。
+
+## 2026-10-13  T0 / RESMAN 共用 ISR
+
+- 做到：256 个向量小入口接共用 stub，规范错误码/寄存器帧并对齐 C 调用栈；IDT 接管时保留 monitor 单步/断点和向量 8，提供私有回调注册。make、QEMU PC/Q35 的 #UD/#GP 与中断返回回归通过。
+- 下一步：完成具体 IRQ 分发、PIC 重映射与键盘队列；再推进协作式任务切换。
+- 坑：当前 RESMAN 蓝底循环不返回，旧命令行 boot_test 不适用；普通 IRQ 仍屏蔽，专用 #DF 初始化暂不调用。
+
 ## 2026-10-12  RESMAN 清理 / T0 准备
 
 - 做到：移除 RESMAN 图形/鼠标测试与 GDT 临时输出，只保留一次性内存/GDT 初始化；修正 GDTR 字段顺序及六字节布局，更新启动回归和当前进度说明；make 与 QEMU PC/Q35 启动、重复调用、GDT、视频切换回归通过。

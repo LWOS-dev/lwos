@@ -126,6 +126,11 @@ static void proc_md(PTUI_AREA a, DWORD ctrl) {
     draw:
     for (int i=0; i<2; i++) {
         for (int j=0; j<4; j++) {
+            DWORD data[2];
+            PVOID pdata=(PVOID)data;
+            for (int k=0; k<2; k++) {
+                data[k]=*((PDWORD)offset[i]+k+j*2);
+            }
             if (i==index) {
                 set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE);
             } else {
@@ -151,12 +156,12 @@ static void proc_md(PTUI_AREA a, DWORD ctrl) {
             }
             hex_xlat(offset[i],tstrdw,8);
             putxyn(tstrdw,a->x+1,a->y+1+i*5,8);
-            hex_xlat(offset[i]+j*16,tstrdw,8);
+            hex_xlat(offset[i]+j*8,tstrdw,8);
             putxyn(tstrdw,a->x+1,a->y+j+2+i*5,8);
             switch (unit[i]) {
                 case 0: {
                     for (int k=0; k<8; k++) {
-                        hex_xlat(*((PBYTE)((PVOID)offset[i])+j*16+k),tstrqw,2);
+                        hex_xlat(*((PBYTE)pdata+k),tstrqw,2);
                         putxy("   ",a->x+k*3+10,a->y+i*5+2+j);
                         putxyn(tstrqw,a->x+k*3+10,a->y+i*5+2+j,2);
                     }
@@ -164,7 +169,7 @@ static void proc_md(PTUI_AREA a, DWORD ctrl) {
                 }
                 case 1: {
                     for (int k=0; k<4; k++) {
-                        hex_xlat(*((PWORD)((PVOID)offset[i])+j*16+k),tstrqw,4);
+                        hex_xlat(*((PWORD)pdata+k),tstrqw,4);
                         putxy("      ",a->x+k*6+10,a->y+i*5+2+j);
                         putxyn(tstrqw,a->x+k*6+10,a->y+i*5+2+j,4);
                     }
@@ -172,20 +177,25 @@ static void proc_md(PTUI_AREA a, DWORD ctrl) {
                 }
                 case 2: {
                     for (int k=0; k<2; k++) {
-                        hex_xlat(*((PDWORD)((PVOID)offset[i])+j*16+k),tstrqw,8);
+                        hex_xlat(*((PDWORD)pdata+k),tstrqw,8);
                         putxy("            ",a->x+k*12+10,a->y+i*5+2+j);
                         putxyn(tstrqw,a->x+k*12+10,a->y+i*5+2+j,8);
                     }
                     break;
                 }
                 case 3: {
-                    hex_xlat(*((PQWORD)((PVOID)offset[i])+j*16),tstrqw,16);
+                    hex_xlat(*((PQWORD)pdata),tstrqw,16);
                     putxy("                        ",a->x+10,a->y+i*5+2+j);
                     putxyn(tstrqw,a->x+10,a->y+i*5+2+j,16);
                     break;
                 }
             }
+            for (int k=0; k<8; k++) {
+                BYTE b=*((PBYTE)data+k);
+                putxyc(to_avail(b),a->x+34+k,a->y+i*5+2+j);
+            }
         }
+        putxyn(name_units[unit[i]],a->x+34,a->y+1+i*5,5);
     }
     if (typing==1) {
         set_attr(TUI_BLACK,TUI_WHITE);
@@ -340,7 +350,7 @@ static void proc_mr(PTUI_AREA a, DWORD ctrl) {
         if (i==index && s==0) {
             set_attr(TUI_BLACK,TUI_WHITE);
         } else {
-            set_attr(TUI_WHITE,TUI_BLUE);
+            set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE);
         }
         putxy(name_units[type[i]],a->x+1,a->y+1+i);
         if (i==index && s==1) {

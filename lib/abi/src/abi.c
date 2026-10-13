@@ -58,6 +58,7 @@ const PVOID lw_abi[LW_SLOT_COUNT] __attribute__((section(".abi"), used, aligned(
     [LW_SLOT_IO_INL]           = (PVOID)inl,
     [LW_SLOT_IO_KBD_PROBE]      = (PVOID)kbd_probe,
     [LW_SLOT_IO_KBD_ENABLE]     = (PVOID)kbd_enable,
+    [LW_SLOT_IO_KBD_BIND_SOURCE] = (PVOID)kbd_bind_source,
     [LW_SLOT_IO_VIDEO_ENTER]    = (PVOID)gfx_enter,
     [LW_SLOT_IO_VIDEO_EXIT]     = (PVOID)gfx_exit,
     [LW_SLOT_IO_VIDEO_LIVE]     = (PVOID)gfx_live,
@@ -88,8 +89,12 @@ const PVOID lw_abi[LW_SLOT_COUNT] __attribute__((section(".abi"), used, aligned(
 
 /* 自己清自己的 bss, 调用方不需要知道 ABI.BIN 的内存布局 */
 int abi_init(void) {
+    static int initialized;
+    /* loader 首次调用前已清 BSS；后续 APP attach 不重置共享资源。 */
+    if (initialized)return 0;
     for (char *p = __bss_start; p < __bss_end; p++) {
         *p = 0;
     }
+    initialized=1;
     return 0;
 }

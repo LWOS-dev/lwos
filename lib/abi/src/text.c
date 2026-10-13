@@ -223,6 +223,7 @@ int getk() {
         int k;
         k = kbd_poll();
         if (k != K_NONE)return k;
+        kbd_wait();
     }
 }
 

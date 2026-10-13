@@ -99,7 +99,8 @@ extern IDTR sys_idtr;
 void int_xlat_read(PINT_DESC src, PSMP_INT dest);
 void int_xlat_write(PINT_DESC dest, PSMP_INT src);
 void idt_update(void);
-void idt_init(void);
+/* entries 包含 INT_MAX 个入口；保留 monitor 的 #DB/#BP 和向量 8。 */
+void idt_init(PCDWORD entries);
 
 typedef struct _TSS32 {
     DWORD backlink;     // +0h

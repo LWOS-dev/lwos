@@ -326,11 +326,6 @@ static void execute(const char* str) {
             *str++:0;
 
     switch (c0) {
-        case 'r': {
-            if (c1 == 'm') start_resman();
-            else lw_puts("USAGE: rm\n\r");
-            break;
-        }
         case 'm': {
             mmap_init();
             mmap_dump();
@@ -445,11 +440,6 @@ static void execute(const char* str) {
                     break;
                 }
             }
-            break;
-        }
-        case 'b': {
-            lw_puts("BLOCK DEVICE\n\r");
-
             break;
         }
         case 'h': {
@@ -615,6 +605,8 @@ void monitor_main(void) {
     lw_kbd_probe();
     lw_kbd_enable();
     lw_fpu_init();
+
+    start_resman();
 
     tui_init();
     tui_loop();

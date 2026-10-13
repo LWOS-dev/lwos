@@ -88,10 +88,10 @@ void idt_update(void) {
     asm volatile("lidt %0" : : "m"(sys_idtr) : "memory");
 }
 
-void idt_init(void) {
-    /* 接管表的存储，暂时保留 monitor 的有效异常入口。
-     * 不把 offset=0 的占位门设为 present；专用入口可随后逐项替换。
-     */
+void idt_init(PCDWORD entries) {
+    /* 接管期间禁止普通 IRQ，整张表构造完成后才执行 lidt。 */
+    DWORD flags;
+    asm volatile("pushfl; popl %0; cli" : "=r"(flags) : : "memory");
     IDTR previous;
     asm volatile("sidt %0" : "=m"(previous) : : "memory");
     sys_idt = (PINT_DESC)0x370000;
@@ -102,9 +102,22 @@ void idt_init(void) {
         memzero(sys_idt, capacity);
         memcpy(sys_idt, (PCVOID)previous.base, bytes);
     }
+    for (DWORD i = 0; i < INT_MAX; i++) {
+        /* 保留单步/断点的 monitor 调试路径；暂不更换 #DF 入口。 */
+        if (i == 8 || ((i == 1 || i == 3) && (sys_idt[i].attr & 8)))
+            continue;
+        SMP_INT gate = {
+            .sel = 0x08,
+            .type = INT_INT32,
+            .attr = entries[i] ? INT_RING_0 : 0,
+            .offset = entries[i],
+        };
+        int_xlat_write(sys_idt + i, &gate);
+    }
     sys_idtr.base = (DWORD)sys_idt;
     sys_idtr.limit = INT_MAX * sizeof(INT_DESC) - 1;
     idt_update();
+    asm volatile("pushl %0; popfl" : : "r"(flags) : "memory", "cc");
 }
 
 static TSS32 df_tss;

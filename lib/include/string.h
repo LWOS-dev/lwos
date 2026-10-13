@@ -13,5 +13,6 @@ void skip_ws(PPCSTR p);
 int strcspn(PCSTR src, PCSTR reject);
 
 CHAR to_upper(BYTE c);
+CHAR to_avail(BYTE c);
 
 #endif
