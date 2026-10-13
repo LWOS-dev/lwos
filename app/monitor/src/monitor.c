@@ -491,13 +491,6 @@ static void execute(const char* str) {
             }
             break;
         }
-        case 'd': {
-            if (!hex_parse(&str, &a)) {
-                return;
-            }
-            lw_dump128((PVOID)a);
-            break;
-        }
         case 'n': {
             BYTE tb,td,tf;
             DWORD bar0;

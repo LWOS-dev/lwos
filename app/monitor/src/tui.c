@@ -31,9 +31,11 @@ static void set_attr(BYTE fore, BYTE back) {
 }
 
 TUI_AREA area_mem_reader;
+TUI_AREA area_mem_dump;
 
 const char name_units[4][6]={" BYTE"," WORD","DWORD","QWORD"};
 const char name_area_mr[]="MEM READER";
+const char name_area_md[]="MEM DUMP";
 
 void draw_area(PTUI_AREA p) {
     set_attr((focus==p->index)?(TUI_YELLOW|TUI_LIGHT):(TUI_WHITE),TUI_BLUE);
@@ -50,7 +52,7 @@ void draw_area(PTUI_AREA p) {
     putxyc(192,p->x,p->y+p->h);
     putxyc(217,p->x+p->w,p->y+p->h);
     if (focus==p->index) {
-        set_attr(TUI_WHITE,TUI_BLUE|TUI_LIGHT);
+        set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE|TUI_LIGHT);
     } else {
         set_attr(TUI_WHITE,TUI_BLUE);
     }
@@ -58,23 +60,159 @@ void draw_area(PTUI_AREA p) {
 }
 static int type_ptr=0;
 static CHAR type_buf[17];
+static void proc_md(PTUI_AREA a, DWORD ctrl) {
+    static int index=0; // 放两排dump
+    static DWORD offset[2]={0x400000,0x400000};
+    static int unit[2];
+    CHAR tstrdw[9];
+    CHAR tstrqw[17];
+    static int typing=0;
+    if (focus!=a->index)goto draw;
+    set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE);
+    putxy("F4=SUBMIT           SPACE=ENTER OFFSET  F6=UNIT DEC",0,23);
+    putxy("PGUP/PGDN=OFFSET    \x18\x19=INDEX            F7=UNIT INC",0,24);
+    switch (ctrl) {
+        case VK_UP: {
+            index=0;
+            break;
+        }
+        case VK_DOWN: {
+            index=1;
+            break;
+        }
+        case VK_F6: {
+            unit[index]--;
+            if (unit[index]<0)unit[index]=0;
+            break;
+        }
+        case VK_F7: {
+            unit[index]++;
+            if (unit[index]>3)unit[index]=3;
+            break;
+        }
+        case VK_PGUP: {
+            offset[index]-=64;
+            break;
+        }
+        case VK_PGDN: {
+            offset[index]+=64;
+            break;
+        }
+        case ' ': {
+            if (typing==0) {
+                typing=1;
+                memzero(type_buf, 17);
+                type_ptr=0;
+                break;
+            }
+            break;
+        }
+        case VK_F4: {
+            PCSTR input=type_buf;
+            hex_parse(&input,&offset[index]);
+            typing=0;
+            break;
+        }
+    }
+    if (typing==1 && ctrl<0x100 && hex_digit((char)ctrl)!=0xff && type_ptr<8) {
+        type_buf[type_ptr++]=(char)ctrl;
+        type_buf[type_ptr]=0;
+        if (type_ptr==8) {
+            PCSTR input=type_buf;
+            hex_parse(&input,&offset[index]);
+            typing=0;
+        }
+    }
+    draw:
+    for (int i=0; i<2; i++) {
+        for (int j=0; j<4; j++) {
+            if (i==index) {
+                set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE);
+            } else {
+                set_attr(TUI_WHITE,TUI_BLUE);
+            }
+            switch (unit[i]) {
+                case 0: {
+                    putxy("+0 +1 +2 +3 +4 +5 +6 +7",a->x+10,a->y+i*5+1);
+                    break;
+                }
+                case 1: {
+                    putxy("  +0    +2    +4    +6 ",a->x+10,a->y+i*5+1);
+                    break;
+                }
+                case 2: {
+                    putxy("      +0          +4   ",a->x+10,a->y+i*5+1);
+                    break;
+                }
+                case 3: {
+                    putxy("              +0       ",a->x+10,a->y+i*5+1);
+                    break;
+                }
+            }
+            hex_xlat(offset[i],tstrdw,8);
+            putxyn(tstrdw,a->x+1,a->y+1+i*5,8);
+            hex_xlat(offset[i]+j*16,tstrdw,8);
+            putxyn(tstrdw,a->x+1,a->y+j+2+i*5,8);
+            switch (unit[i]) {
+                case 0: {
+                    for (int k=0; k<8; k++) {
+                        hex_xlat(*((PBYTE)((PVOID)offset[i])+j*16+k),tstrqw,2);
+                        putxy("   ",a->x+k*3+10,a->y+i*5+2+j);
+                        putxyn(tstrqw,a->x+k*3+10,a->y+i*5+2+j,2);
+                    }
+                    break;
+                }
+                case 1: {
+                    for (int k=0; k<4; k++) {
+                        hex_xlat(*((PWORD)((PVOID)offset[i])+j*16+k),tstrqw,4);
+                        putxy("      ",a->x+k*6+10,a->y+i*5+2+j);
+                        putxyn(tstrqw,a->x+k*6+10,a->y+i*5+2+j,4);
+                    }
+                    break;
+                }
+                case 2: {
+                    for (int k=0; k<2; k++) {
+                        hex_xlat(*((PDWORD)((PVOID)offset[i])+j*16+k),tstrqw,8);
+                        putxy("            ",a->x+k*12+10,a->y+i*5+2+j);
+                        putxyn(tstrqw,a->x+k*12+10,a->y+i*5+2+j,8);
+                    }
+                    break;
+                }
+                case 3: {
+                    hex_xlat(*((PQWORD)((PVOID)offset[i])+j*16),tstrqw,16);
+                    putxy("                        ",a->x+10,a->y+i*5+2+j);
+                    putxyn(tstrqw,a->x+10,a->y+i*5+2+j,16);
+                    break;
+                }
+            }
+        }
+    }
+    if (typing==1) {
+        set_attr(TUI_BLACK,TUI_WHITE);
+        putxy("        ",a->x+1,a->y+1+index*5);
+        putxyn(type_buf,a->x+1,a->y+1+index*5,type_ptr);
+    }
+}
 static void proc_mr(PTUI_AREA a, DWORD ctrl) {
     static int index=0;
     static int s=0;
     static int stt_a=0; // status addr
     static int mat=0; // modify addr ptr
-    static DWORD addr[8];
+    static DWORD addr[8] = {
+        0x400000,0x400000,0x400000,0x400000,
+        0x400000,0x400000,0x400000,0x400000
+    };
     static QWORD tmp=0;
     static int type[8]={2,2,2,2,2,2,2,2}; // 保留每行的类型：0db 1dw 2dd 3dq
 
     CHAR tstrdw[9];
     CHAR tstrqw[17];
 
+    if (focus!=a->index)goto draw;
+
     set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE);
     putxy("F4=SUBMIT       SPACE=ENTER     \x18\x19=INDEX",0,23);
     putxy("F6=UNIT DEC     F7=UNIT INC     \x1a\x1b=COLUMN",0,24);
-
-    if (focus!=a->index)goto draw;
     switch (ctrl) {
         case VK_UP: {
             index--;
@@ -212,6 +350,8 @@ static void proc_mr(PTUI_AREA a, DWORD ctrl) {
         }
         hex_xlat(addr[i],tstrdw,8);
         putxy(tstrdw,a->x+7,a->y+1+i);
+        set_attr(TUI_BLACK|TUI_LIGHT,TUI_BLUE);
+        putxy("0000000000000000",a->x+16,a->y+1+i);
         if (i==index && s==2) {
             set_attr(TUI_BLACK,TUI_WHITE);
         } else {
@@ -235,7 +375,6 @@ static void proc_mr(PTUI_AREA a, DWORD ctrl) {
                 break;
             }
         }
-        putxy("                ",a->x+16,a->y+1+i);
         putxy(tstrqw,a->x+16,a->y+1+i);
     }
     if (stt_a==1) {
@@ -265,9 +404,16 @@ void tui_init() {
     area_mem_reader.x=0;
     area_mem_reader.y=1;
     area_mem_reader.w=32;
-    area_mem_reader.h=12;
+    area_mem_reader.h=9;
     area_mem_reader.name=name_area_mr;
     area_mem_reader.index=0;
+
+    area_mem_dump.x=0;
+    area_mem_dump.y=11;
+    area_mem_dump.w=44;
+    area_mem_dump.h=11;
+    area_mem_dump.name=name_area_md;
+    area_mem_dump.index=1;
 }
 void tui_loop() {
     DWORD t=0;
@@ -280,7 +426,9 @@ void tui_loop() {
             }
         }
         draw_area(&area_mem_reader);
+        draw_area(&area_mem_dump);
         proc_mr(&area_mem_reader,t);
+        proc_md(&area_mem_dump,t);
         t=lw_getk();
     }
 }
