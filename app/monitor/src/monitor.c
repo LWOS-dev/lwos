@@ -4,6 +4,7 @@
 #include "eth_tmp.h"
 #include "fs_monitor.h"
 #include "keys.h"
+#include "tui.h"
 
 // headers from common libraries
 #include "mem.h"
@@ -105,16 +106,7 @@ static void start_resman(void)
     lw_puts("\n\r");
 }
 FS_FILE vi_file;
-BYTE vi_attr;
 PBYTE vi_buf;
-PWORD video=(PVOID)0xb8000;
-void putxy(const char* str, int x, int y) {
-    const char* p=str;
-    int length=strlen(p);
-    for (int i=0; i<length; i++) {
-        *(video+x+y*80+i)=(((WORD)vi_attr)<<8)|(*(p+i));
-    }
-}
 void edit_hex() {
     vi_buf=(PVOID)0x400000;
     // monitor环境还没开启资源管理，可能没有写动态分配的必要
@@ -506,103 +498,6 @@ static void execute(const char* str) {
             lw_dump128((PVOID)a);
             break;
         }
-        case 'o': { // out/write
-            if (!hex_parse(&str, &a)) {
-                return;
-            }
-            if (!hex_parse(&str,&b)) {
-                return;
-            }
-            switch (c1) {
-                case 'b': {
-                    a&=0xffffffff;
-                    lw_put_dword(a);
-                    lw_puts(":");
-                    lw_put_byte(b);
-                    lw_puts("\n\r");
-                    *(PBYTE)(a)=(BYTE)b;
-                    if (*(PBYTE)a!=(BYTE)b) {
-                        lw_puts("WROTE FAIL\n\r");
-                        lw_put_dword(a);
-                        lw_puts(":");
-                        lw_put_byte(*(PBYTE)a);
-                        lw_puts("\n\r");
-                    }
-                    break;
-                }
-                case 'w': {
-                    a&=0xfffffffe;
-                    lw_put_dword(a);
-                    lw_puts(":");
-                    lw_put_word(b);
-                    lw_puts("\n\r");
-                    *(PWORD)(a)=(WORD)b;
-                    if (*(PWORD)a!=(WORD)b) {
-                        lw_puts("WROTE FAIL\n\r");
-                        lw_put_dword(a);
-                        lw_puts(":");
-                        lw_put_word(*(PWORD)a);
-                        lw_puts("\n\r");
-                    }
-                    break;
-                }
-                case 'l': {
-                    a&=0xfffffffc;
-                    lw_put_dword(a);
-                    lw_puts(":");
-                    lw_put_dword(b);
-                    lw_puts("\n\r");
-                    *(PDWORD)(a)=(DWORD)b;
-                    if (*(PDWORD)a!=(DWORD)b) {
-                        lw_puts("WROTE FAIL\n\r");
-                        lw_put_dword(a);
-                        lw_puts(":");
-                        lw_put_byte(*(PDWORD)a);
-                        lw_puts("\n\r");
-                    }
-                    break;
-                }
-                default:return;
-            }
-            break;
-        }
-        case 'i': { // in/read
-            DWORD d;
-            if (!hex_parse(&str, &a)) {
-                return;
-            }
-            switch (c1) {
-                case 'b': {
-                    a&=0xffffffff;
-                    d=*(PBYTE)a;
-                    lw_put_dword(a);
-                    lw_puts(":");
-                    lw_put_byte(d);
-                    lw_puts("\n\r");
-                    break;
-                }
-                case 'w': {
-                    a&=0xfffffffe;
-                    d=*(PWORD)a;
-                    lw_put_dword(a);
-                    lw_puts(":");
-                    lw_put_word(d);
-                    lw_puts("\n\r");
-                    break;
-                }
-                case 'l': {
-                    a&=0xfffffffc;
-                    d=*(PDWORD)a;
-                    lw_put_dword(a);
-                    lw_puts(":");
-                    lw_put_dword(d);
-                    lw_puts("\n\r");
-                    break;
-                }
-                default:return;
-            }
-            break;
-        }
         case 'n': {
             BYTE tb,td,tf;
             DWORD bar0;
@@ -727,6 +622,13 @@ void monitor_main(void) {
     lw_kbd_probe();
     lw_kbd_enable();
     lw_fpu_init();
+
+    tui_init();
+    tui_loop();
+    asm volatile ("cli");
+    while (1) {
+        asm volatile ("hlt");
+    }
 
     while (mon_block) {
         prompt_read();
