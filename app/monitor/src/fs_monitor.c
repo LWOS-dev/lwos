@@ -59,7 +59,7 @@ void dir_list(PFS_VOLUME fs, DWORD cluster) {
     if (!fs || !fs->mounted) {
         return;
     }
-    DWORD idx=0;
+    //DWORD idx=0;
     DWORD cur=cluster;
     SFT_T res;
     for (DWORD hops = 0; hops < fs->cluster_count; hops++) {

@@ -15,7 +15,7 @@
 #include "resman.h"
 
 PVOID *lw_abi_base;
-static FS_VOLUME monitor_fs;
+FS_VOLUME monitor_fs;
 
 /* ABI 不可用时连 puts 都没有, 只能直接写显存 */
 static void no_abi_halt(void) {
@@ -444,41 +444,6 @@ static void execute(const char* str) {
         }
         case 'h': {
             help();
-            break;
-        }
-        case 'f': {
-            switch (c1) {
-                case 'i': {
-                    if (fs_init(&monitor_fs) < 0)
-                        lw_puts("FILESYSTEM INIT FAILED\n\r");
-                    break;
-                }
-                case 'l': {
-                    if (!hex_parse(&str, &a)) {
-                        lw_puts("DIR CLUSTER IS REQUIRED\n\r");
-                        return;
-                    }
-                    dir_list(&monitor_fs, a);
-                    break;
-                }
-                case 't': {
-                    if (!hex_parse(&str, &a)) {
-                        lw_puts("TRACE FAT CHAIN\n\r");
-                        return;
-                    }
-                    DWORD cc=a,cn=0;
-                    lw_put_dword(cc);
-                    lw_puts("\n\r");
-                    while (next_cluster(&monitor_fs,cc,&cn)==1) {
-                        lw_puts("  ->");
-                        lw_put_dword(cn);
-                        lw_puts("\n\r");
-                        cc=cn;
-                        cn=0;
-                    }
-                    break;
-                }
-            }
             break;
         }
         case 'n': {

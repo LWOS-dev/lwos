@@ -86,6 +86,11 @@ int fat_read_fte(PFS_VOLUME fs, DWORD dir_cluster, int index, PSFT_T p) {
     p->attr = e[11];
     p->cluster = (((DWORD)read16(e + 0x14) << 16) |
                   read16(e + 0x1a)) & 0x0fffffffu;
+    if ((p->attr&0x10)&&
+        p->cluster==0&&
+        strncmp(p->name,"..         ",11)==0) {
+        p->cluster=fs->root_cluster;
+    }
     p->length = read32(e + 0x1c);
     return FS_ENTRY_VALID;
 }

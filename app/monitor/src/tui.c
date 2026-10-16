@@ -2,6 +2,7 @@
 #include "../include/keys.h"
 
 #include "abi.h"
+#include "fs.h"
 #include "string.h"
 #include "convert.h"
 #include "mem.h"
@@ -32,18 +33,34 @@ static void set_attr(BYTE fore, BYTE back) {
 
 TUI_AREA area_mem_reader;
 TUI_AREA area_mem_dump;
+TUI_AREA area_file_info;
+TUI_AREA area_file_expl;
 
+static int menu_items=4;
+static int menu_index=0;
+static int tuim_page=0;
+
+const char name_menu[][7]={
+    "MENU",
+    "RESET",
+    "HALT",
+    "RCS",
+    "DEVICE"
+};
 const char name_units[4][6]={" BYTE"," WORD","DWORD","QWORD"};
 const char name_area_mr[]="MEM READER";
 const char name_area_md[]="MEM DUMP";
+const char name_area_fi[]="FILE INFO";
+const char name_area_fe[]="FILE EXPLORER";
 
 void draw_area(PTUI_AREA p) {
     set_attr((focus==p->index)?(TUI_YELLOW|TUI_LIGHT):(TUI_WHITE),TUI_BLUE);
-    for (int i=0; i<p->w; i++) {
+    if (p->index==-1u)set_attr(TUI_WHITE,TUI_BLUE);
+    for (DWORD i=0; i<p->w; i++) {
         putxyc(196,p->x+i,p->y);
         putxyc(196,p->x+i,p->y+p->h);
     }
-    for (int i=0; i<p->h; i++) {
+    for (DWORD i=0; i<p->h; i++) {
         putxyc(179,p->x,p->y+i);
         putxyc(179,p->x+p->w,p->y+i);
     }
@@ -56,10 +73,169 @@ void draw_area(PTUI_AREA p) {
     } else {
         set_attr(TUI_WHITE,TUI_BLUE);
     }
+    if (p->index==-1u)set_attr(TUI_AQUA,TUI_BLUE);
     putxy(p->name,p->x+1,p->y);
+}
+void draw_menu() {
+    if (focus==0) {
+        set_attr(TUI_BLACK,TUI_AQUA|TUI_LIGHT);
+    } else {
+        set_attr(TUI_WHITE,TUI_BLUE);
+    }
+    putxyn(name_menu[0],0,1,6);
+    for (int i=0; i<menu_items; i++) {
+        if (menu_index==i) {
+            set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE);
+        } else {
+            set_attr(TUI_WHITE,TUI_BLUE);
+        }
+        putxyn(name_menu[i+1],0,i+2,6);
+    }
+}
+void proc_menu(DWORD ctrl) {
+    if (focus!=0)return;
+    switch (ctrl) {
+        case VK_UP: {
+            menu_index--;
+            if (menu_index<0)menu_index=0;
+            break;
+        }
+        case VK_DOWN: {
+            menu_index++;
+            if (menu_index>menu_items)menu_index=menu_items;
+            break;
+        }
+        case 0x666: { // 暂不开放
+            tuim_page=menu_index;
+            break;
+        }
+    }
 }
 static int type_ptr=0;
 static CHAR type_buf[17];
+extern FS_VOLUME monitor_fs;
+static DWORD fe_current_cluster;
+static PSFT_T filelist_ptr;
+static DWORD filelist_length;
+static void proc_fe_update_list() {
+    DWORD cur=fe_current_cluster;
+    DWORD count=0;
+    SFT_T res;
+    for (DWORD hops = 0; hops < monitor_fs.cluster_count; hops++) {
+        int entries = 16;
+        for (int i = 0; i < entries; i++) {
+            int status = fat_read_fte(&monitor_fs, cur, i, &res);
+            if (status == FS_ENTRY_END || status < 0)
+                goto L1;
+            if (status == FS_ENTRY_SKIP)
+                continue;
+            count++;
+        }
+        int status = next_cluster(&monitor_fs, cur, &cur);
+        if (status <= 0)
+            goto L1;
+    }
+    L1:
+    if (filelist_ptr) {
+        kfree(filelist_ptr);
+    }
+    filelist_ptr=(PSFT_T)kmalloc(count*sizeof(SFT_T));
+    filelist_length=count;
+    count=0;
+    cur=fe_current_cluster;
+    for (DWORD hops = 0; hops < monitor_fs.cluster_count; hops++) {
+        int entries = 16;
+        for (int i = 0; i < entries; i++) {
+            int status = fat_read_fte(&monitor_fs, cur, i, &res);
+            if (status == FS_ENTRY_END || status < 0)
+                return;
+            if (status == FS_ENTRY_SKIP)
+                continue;
+            memcpy(&filelist_ptr[count],&res,sizeof(SFT_T));
+            count++;
+        }
+        int status = next_cluster(&monitor_fs, cur, &cur);
+        if (status <= 0)
+            return;
+    }
+}
+static void subproc_fi(PTUI_AREA a, int fileindex) {
+    set_attr(TUI_WHITE,TUI_BLUE);
+    char tstrdw[9];
+    putxy("LENGTH",a->x+1,a->y+1);
+    hex_xlat(filelist_ptr[fileindex].length,tstrdw,8);
+    putxy(tstrdw,a->x+1,a->y+2);
+    putxy("CLUSTER",a->x+1,a->y+3);
+    hex_xlat(filelist_ptr[fileindex].cluster,tstrdw,8);
+    putxy(tstrdw,a->x+1,a->y+4);
+    putxy("ATTR",a->x+1,a->y+5);
+    bin_xlat(filelist_ptr[fileindex].length,tstrdw,8);
+    putxy(tstrdw,a->x+1,a->y+6);
+    putxy("CURRENT",a->x+1,a->y+7);
+    hex_xlat(fe_current_cluster,tstrdw,8);
+    putxy(tstrdw,a->x+1,a->y+8);
+}
+static void proc_fe(PTUI_AREA a, DWORD ctrl) {
+    static int index=0;
+    char tstrdw[9];
+    if (focus!=a->index)goto draw;
+    set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE);
+    putxy("F5=REFRESH          SPACE=ENTER CLUSTER       F6=UNIT DEC",0,23);
+    putxy("F2=ENTER DIR        \x18\x19=INDEX               F7=UNIT INC",0,24);
+    switch (ctrl) {
+        case VK_F5: {
+            proc_fe_update_list();
+            index=0;
+            break;
+        }
+        case VK_F2: {
+            if (filelist_ptr[index].attr&0x10) {
+                fe_current_cluster=
+                (filelist_ptr[index].cluster==0)?2:filelist_ptr[index].cluster;
+            }
+            proc_fe_update_list();
+            index=0;
+            break;
+        }
+        case VK_UP: {
+            index--;
+            if (index<0)index=0;
+            break;
+        }
+        case VK_DOWN: {
+            index++;
+            if (index>filelist_length)index=filelist_length;
+            break;
+        }
+    }
+    draw:
+    for (int i=0;i<18;i++) {
+        set_attr(TUI_WHITE,TUI_BLUE);
+        putxyn("                        ",a->x+1,a->y+i+1,24);
+    }
+    for (DWORD i=0; i<18; i++) {
+        if (i>=filelist_length)break;
+        if (focus==a->index) {
+            if (i==index) {
+                set_attr(TUI_BLACK,TUI_WHITE);
+            } else {
+                set_attr(TUI_WHITE,TUI_BLUE);
+            }
+        } else {
+            set_attr((i==index)?(TUI_WHITE|TUI_LIGHT):TUI_WHITE,TUI_BLUE);
+        }
+        putxyn("                        ",a->x+1,a->y+i+1,24);
+        putxyn(filelist_ptr[i].name,a->x+1,a->y+1+i,8);
+        if (filelist_ptr[i].attr&0x10) {
+            putxyn("<DIR>",a->x+9,a->y+1+i,5);
+        } else {
+            putxyn(filelist_ptr[i].name+8,a->x+10,a->y+1+i,3);
+        }
+        hex_xlat(filelist_ptr[i].cluster,tstrdw,8);
+        putxy(tstrdw,a->x+16,a->y+1+i);
+    }
+    subproc_fi(&area_file_info,index);
+}
 static void proc_md(PTUI_AREA a, DWORD ctrl) {
     static int index=0; // 放两排dump
     static DWORD offset[2]={0x400000,0x400000};
@@ -91,11 +267,11 @@ static void proc_md(PTUI_AREA a, DWORD ctrl) {
             break;
         }
         case VK_PGUP: {
-            offset[index]-=64;
+            offset[index]-=32;
             break;
         }
         case VK_PGDN: {
-            offset[index]+=64;
+            offset[index]+=32;
             break;
         }
         case ' ': {
@@ -401,42 +577,81 @@ static void proc_mr(PTUI_AREA a, DWORD ctrl) {
 void tui_init() {
     video=(PVOID)0xb8000;
     focus=0;
-    for (int i=0; i<80*25; i++) {
-        video[i]=(TUI_BLUE<<4)<<8;
-    }
-    for (int i=0; i<80; i++) {
-        video[i]=(TUI_WHITE<<4)<<8;
-    }
-    lw_setcur(0);
-    set_attr(TUI_BLACK,TUI_WHITE);
-    putxy("LWOS MONITOR V1 TUI",2,0);
-    set_attr(TUI_WHITE,TUI_BLUE);
-    for (int i=0;i<160;i++) {
-        video[80*22+i]=vi_attr<<8;
-    }
 
-    area_mem_reader.x=0;
+    area_mem_reader.x=6;
     area_mem_reader.y=1;
     area_mem_reader.w=32;
     area_mem_reader.h=9;
     area_mem_reader.name=name_area_mr;
-    area_mem_reader.index=0;
+    area_mem_reader.index=1;
 
-    area_mem_dump.x=0;
+    area_mem_dump.x=6;
     area_mem_dump.y=11;
     area_mem_dump.w=44;
     area_mem_dump.h=11;
     area_mem_dump.name=name_area_md;
-    area_mem_dump.index=1;
+    area_mem_dump.index=2;
+
+    area_file_info.x=40;
+    area_file_info.y=1;
+    area_file_info.w=10;
+    area_file_info.h=9;
+    area_file_info.name=name_area_fi;
+    area_file_info.index=-1;
+
+    area_file_expl.x=52;
+    area_file_expl.y=1;
+    area_file_expl.w=27;
+    area_file_expl.h=21;
+    area_file_expl.name=name_area_fe;
+    area_file_expl.index=3;
+
+    fe_current_cluster=monitor_fs.root_cluster;
+    filelist_ptr=0;
+    proc_fe_update_list();
+
+    menu_index=2;
+
+    lw_setcur(0);
+}
+void tui_clr() {
+    for (int i=0; i<80; i++) {
+        video[i]=(((WORD)TUI_WHITE)<<4)<<8;
+    }
+    set_attr(TUI_BLACK,TUI_WHITE);
+    putxy("LWOS MONITOR V1 TUI",2,0);
+    set_attr(TUI_WHITE,TUI_BLUE);
+    for (int i=0;i<160;i++) {
+        video[80*23+i]=((WORD)vi_attr)<<8;
+    }
+}
+void tui_procs(DWORD t) {
+    tui_clr();
+    proc_menu(t);
+    switch (tuim_page) {
+        case 0: {
+            proc_mr(&area_mem_reader,t);
+            proc_md(&area_mem_dump,t);
+            proc_fe(&area_file_expl,t);
+            break;
+        }
+    }
+}
+void tui_draws() {
+    switch (tuim_page) {
+        case 0: {
+            draw_area(&area_mem_reader);
+            draw_area(&area_mem_dump);
+            draw_area(&area_file_info);
+            draw_area(&area_file_expl);
+            break;
+        }
+    }
 }
 void tui_loop() {
     DWORD t=0;
+    tui_draws();
     while (1) {
-        set_attr(TUI_WHITE,TUI_BLUE);
-        for (int i=0;i<80;i++) {
-            putxyc(' ',i,23);
-            putxyc(' ',i,24);
-        }
         switch (t) {
             case VK_TAB: {
                 focus++;
@@ -444,10 +659,9 @@ void tui_loop() {
                 break;
             }
         }
-        draw_area(&area_mem_reader);
-        draw_area(&area_mem_dump);
-        proc_mr(&area_mem_reader,t);
-        proc_md(&area_mem_dump,t);
+        draw_menu();
+        tui_draws();
+        tui_procs(t);
         t=lw_getk();
     }
 }

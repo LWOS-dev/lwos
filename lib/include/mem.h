@@ -37,5 +37,6 @@ void mem_pool_dump(PMEM_POOL pool);
 PVOID mem_alloc_units(PMEM_POOL pool, DWORD count);
 
 PVOID kmalloc(int size);
+void kfree(PVOID ptr);
 
 #endif

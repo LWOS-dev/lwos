@@ -14,9 +14,10 @@ typedef struct _MBR_T{
 typedef struct _SFT_T{
     CHAR name[12]; // 8.3 磁盘字段为 11 字节, 另留 NUL
     BYTE attr;
+    BYTE resv[3];
     DWORD cluster;
     DWORD length;
-} SFT_T, *PSFT_T; // simplified file table entries
+} SFT_T, *PSFT_T; // simplified file table entries, 21(24) bytes
 typedef struct _FEP_T { // lba + pos
     QWORD lba;
     WORD pos;

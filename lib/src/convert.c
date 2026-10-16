@@ -51,3 +51,10 @@ void hex_xlat(QWORD in, PSTR out, int digits) {
     }
     out[digits]=0;
 }
+void bin_xlat(QWORD in, PSTR out, int digits) {
+    int i=0;
+    for (; i<digits; i++) {
+        out[i]=_hex_digit[(in>>((digits-i-1)*1))&0x1];
+    }
+    out[digits]=0;
+}

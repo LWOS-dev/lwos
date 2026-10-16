@@ -131,22 +131,22 @@ PVOID mem_alloc_units(PMEM_POOL pool, DWORD count) {
     bitmap_set_range(&mem_bm, pos, (int)count);
     pool->base=pos;
     pool->unit_size=count;
-    mem_pool_dump(pool);
+    //mem_pool_dump(pool);
     return (PVOID)(pool->base*4096);
 }
 
 PVOID kmalloc(int size) {
     if (size<0)return 0;
     int cnt=(size+4095)/4096;
-    lw_put_dword(size);
-    lw_puts(" NEED\n\r");
+    //lw_put_dword(size);
+    //lw_puts(" NEED\n\r");
  
     PVOID ptr=0;
 
     for (int i=0; i<MEM_POOL_MAX; i++) {
         if (mem_pool[i].unit_size==0) {
-            lw_put_dword(cnt);
-            lw_puts(" BLOCKS\n\r");
+            //lw_put_dword(cnt);
+            //lw_puts(" BLOCKS\n\r");
             ptr=mem_alloc_units(&mem_pool[i], cnt);
             if (!ptr) {
                 return (PVOID)-1;
