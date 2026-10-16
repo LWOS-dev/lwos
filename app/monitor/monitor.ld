@@ -26,6 +26,7 @@ SECTIONS
     __stack_top = .;
     __bss_end = .;
 
+    ASSERT(__bss_end <= 0x350000, "MONITOR overlaps font/fixed system memory")
     ASSERT(__abi_start == 0x200000, "映像头没有落在 0x200000")
     ASSERT(__abi_end > __abi_start, "映像头是空的，head.o 没链进来")
 

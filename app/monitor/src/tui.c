@@ -102,7 +102,7 @@ void proc_menu(DWORD ctrl) {
         }
         case VK_DOWN: {
             menu_index++;
-            if (menu_index>menu_items)menu_index=menu_items;
+            if (menu_index>=menu_items)menu_index=menu_items-1;
             break;
         }
         case 0x666: { // 暂不开放
@@ -115,126 +115,308 @@ static int type_ptr=0;
 static CHAR type_buf[17];
 extern FS_VOLUME monitor_fs;
 static DWORD fe_current_cluster;
-static PSFT_T filelist_ptr;
-static DWORD filelist_length;
-static void proc_fe_update_list() {
+/* Bounded BSS storage until resman exposes allocation services. The linker
+ * checks the complete monitor image/stack against the next reserved region. */
+#define FE_CAPACITY 256u
+#define HEX_CAPACITY (64u * 1024u)
+static SFT_T filelist_ptr[FE_CAPACITY];
+static DWORD filelist_length, fe_index;
+static char fe_path[256] = "/";
+static int fe_error, fe_truncated;
+static PCSTR fe_message;
+static BYTE hex_buffer[HEX_CAPACITY], hex_staging[HEX_CAPACITY];
+static FS_FILE hex_handles[2];
+static PFS_FILE hex_file=&hex_handles[0];
+static char hex_path[256];
+static DWORD hex_length, hex_cursor;
+static int hex_active, hex_dirty, hex_pending, hex_digits;
+static int hex_confirm, hex_failed, hex_error;
+static DWORD hex_written;
+static PCSTR hex_message;
+
+static void clear_rows(int first, int last) {
+    for (int y=first; y<=last; y++)
+        for (int x=0; x<80; x++)putxyc(' ',x,y);
+}
+
+static void proc_fe_update_list(void) {
     DWORD cur=fe_current_cluster;
-    DWORD count=0;
-    SFT_T res;
-    for (DWORD hops = 0; hops < monitor_fs.cluster_count; hops++) {
-        int entries = 16;
-        for (int i = 0; i < entries; i++) {
-            int status = fat_read_fte(&monitor_fs, cur, i, &res);
-            if (status == FS_ENTRY_END || status < 0)
-                goto L1;
-            if (status == FS_ENTRY_SKIP)
-                continue;
-            count++;
-        }
-        int status = next_cluster(&monitor_fs, cur, &cur);
-        if (status <= 0)
-            goto L1;
+    filelist_length=0;
+    fe_index=0;
+    fe_error=0;
+    fe_truncated=0;
+    fe_message=0;
+    if (!monitor_fs.mounted) {
+        fe_error=FS_ERR_NOT_MOUNTED;
+        return;
     }
-    L1:
-    if (filelist_ptr) {
-        kfree(filelist_ptr);
-    }
-    filelist_ptr=(PSFT_T)kmalloc(count*sizeof(SFT_T));
-    filelist_length=count;
-    count=0;
-    cur=fe_current_cluster;
-    for (DWORD hops = 0; hops < monitor_fs.cluster_count; hops++) {
-        int entries = 16;
-        for (int i = 0; i < entries; i++) {
-            int status = fat_read_fte(&monitor_fs, cur, i, &res);
-            if (status == FS_ENTRY_END || status < 0)
+    for (DWORD hops=0; hops<monitor_fs.cluster_count; hops++) {
+        int entries=monitor_fs.sectors_per_cluster*16;
+        for (int i=0; i<entries; i++) {
+            SFT_T entry;
+            int status=fat_read_fte(&monitor_fs,cur,i,&entry);
+            if (status==FS_ENTRY_END)return;
+            if (status<0) { fe_error=status; goto failed; }
+            if (status!=FS_ENTRY_VALID)continue;
+            if (filelist_length==FE_CAPACITY) {
+                fe_truncated=1;
                 return;
-            if (status == FS_ENTRY_SKIP)
-                continue;
-            memcpy(&filelist_ptr[count],&res,sizeof(SFT_T));
-            count++;
+            }
+            filelist_ptr[filelist_length++]=entry;
         }
-        int status = next_cluster(&monitor_fs, cur, &cur);
-        if (status <= 0)
-            return;
+        int status=next_cluster(&monitor_fs,cur,&cur);
+        if (!status)return;
+        if (status<0) { fe_error=status; goto failed; }
     }
+    fe_error=FS_ERR_FORMAT;
+failed:
+    filelist_length=0;
 }
-static void subproc_fi(PTUI_AREA a, int fileindex) {
+
+/* Build a root-relative path; fs_file_open does not accept dot components. */
+static int fe_entry_path(const SFT_T *entry, PSTR out) {
+    strcpy(out,fe_path);
+    if (!strncmp(entry->name,".          ",11))return 0;
+    if (!strncmp(entry->name,"..         ",11)) {
+        int n=strlen(out);
+        while (n>1 && out[n-1]!='/')n--;
+        if (n>1)n--;
+        out[n]=0;
+        return 0;
+    }
+    int n=strlen(out), base=8, ext=3;
+    while (base && entry->name[base-1]==' ')base--;
+    while (ext && entry->name[8+ext-1]==' ')ext--;
+    if (!base || n+1+base+(ext ? ext+1 : 0)>=256)return FS_ERR_RANGE;
+    if (n>1)out[n++]='/';
+    memcpy(out+n,entry->name,base); n+=base;
+    if (ext) { out[n++]='.'; memcpy(out+n,entry->name+8,ext); n+=ext; }
+    out[n]=0;
+    return 0;
+}
+
+/* Load via a fresh handle and staging buffer: failed reloads leave edits intact. */
+static int hex_load(PCSTR path) {
+    PFS_FILE next=hex_file==&hex_handles[0] ? &hex_handles[1] : &hex_handles[0];
+    DWORD count=0;
+    int err=fs_file_open(&monitor_fs,path,next);
+    if (!err && next->length>HEX_CAPACITY)err=FS_ERR_RANGE;
+    if (!err)err=fs_file_read(next,hex_staging,next->length,&count);
+    if (!err && count!=next->length)err=FS_ERR_IO;
+    if (err) { fs_file_close(next); return err; }
+    fs_file_close(hex_file);
+    hex_file=next;
+    hex_length=next->length;
+    memcpy(hex_buffer,hex_staging,hex_length);
+    hex_cursor=0;
+    hex_dirty=hex_digits=hex_pending=hex_failed=hex_error=hex_confirm=0;
+    hex_written=0;
+    hex_message="LOADED";
+    return 0;
+}
+
+static void hex_open(const SFT_T *entry) {
+    if (entry->attr & 0x10) { fe_message="SELECT A FILE"; return; }
+    char path[256];
+    int err=fe_entry_path(entry,path);
+    if (!err)err=hex_load(path);
+    if (err) { fe_error=err; fe_message="OPEN FAILED (MAX 64 KiB)"; return; }
+    strcpy(hex_path,path);
+    hex_active=1;
+}
+
+static void hex_close(void) {
+    fs_file_close(hex_file);
+    hex_active=hex_dirty=hex_digits=hex_confirm=0;
+    proc_fe_update_list();
     set_attr(TUI_WHITE,TUI_BLUE);
-    char tstrdw[9];
-    putxy("LENGTH",a->x+1,a->y+1);
-    hex_xlat(filelist_ptr[fileindex].length,tstrdw,8);
-    putxy(tstrdw,a->x+1,a->y+2);
-    putxy("CLUSTER",a->x+1,a->y+3);
-    hex_xlat(filelist_ptr[fileindex].cluster,tstrdw,8);
-    putxy(tstrdw,a->x+1,a->y+4);
-    putxy("ATTR",a->x+1,a->y+5);
-    bin_xlat(filelist_ptr[fileindex].length,tstrdw,8);
-    putxy(tstrdw,a->x+1,a->y+6);
-    putxy("CURRENT",a->x+1,a->y+7);
-    hex_xlat(fe_current_cluster,tstrdw,8);
-    putxy(tstrdw,a->x+1,a->y+8);
+    clear_rows(0,24);
 }
-static void proc_fe(PTUI_AREA a, DWORD ctrl) {
-    static int index=0;
-    char tstrdw[9];
-    if (focus!=a->index)goto draw;
-    set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE);
-    putxy("F5=REFRESH          SPACE=ENTER CLUSTER       F6=UNIT DEC",0,23);
-    putxy("F2=ENTER DIR        \x18\x19=INDEX               F7=UNIT INC",0,24);
-    switch (ctrl) {
-        case VK_F5: {
-            proc_fe_update_list();
-            index=0;
-            break;
-        }
-        case VK_F2: {
-            if (filelist_ptr[index].attr&0x10) {
-                fe_current_cluster=
-                (filelist_ptr[index].cluster==0)?2:filelist_ptr[index].cluster;
-            }
-            proc_fe_update_list();
-            index=0;
-            break;
-        }
-        case VK_UP: {
-            index--;
-            if (index<0)index=0;
-            break;
-        }
-        case VK_DOWN: {
-            index++;
-            if (index>filelist_length)index=filelist_length;
-            break;
-        }
+
+static void hex_save(void) {
+    if (hex_digits) { hex_message="ENTER commits pending byte; ESC cancels it"; return; }
+    if (hex_failed) { hex_message="SAVE BLOCKED: reload or exit after I/O failure"; return; }
+    if (hex_file->attr & 1) { hex_message="READ ONLY"; return; }
+    hex_written=0;
+    int err=fs_file_seek(hex_file,0,FS_SEEK_SET);
+    if (!err)err=fs_file_write(hex_file,hex_buffer,hex_length,&hex_written);
+    if (!err && hex_written!=hex_length)err=FS_ERR_IO;
+    if (!err)err=fs_sync(&monitor_fs);
+    hex_error=err;
+    if (err) {
+        /* A partial write/flush failure may already have changed the disk.
+         * Keep edited bytes, but require a fresh load before another save. */
+        hex_failed=1;
+        hex_message="SAVE FAILED; disk may be partly changed. F1 reload / ESC exit";
+    } else {
+        hex_dirty=0;
+        hex_message="SAVED";
     }
-    draw:
-    for (int i=0;i<18;i++) {
+}
+
+static void hex_draw(void) {
+    char text[9];
+    DWORD offset=(hex_cursor/256)*256;
+    set_attr(TUI_WHITE,TUI_BLUE);
+    clear_rows(0,24);
+    putxy("LWOS HEX EDITOR",1,0);
+    putxyn(hex_path,18,0,strlen(hex_path)>60 ? 60 : strlen(hex_path));
+    putxy("OFFSET",1,1); hex_xlat(offset,text,8); putxy(text,8,1);
+    putxy("LENGTH",20,1); hex_xlat(hex_length,text,8); putxy(text,27,1);
+    putxy(hex_dirty ? "MODIFIED" : "CLEAN",38,1);
+    if (hex_file->attr & 1)putxy("READ ONLY",50,1);
+    for (int j=0;j<16;j++) { hex_xlat(j,text,2); putxy(text,11+j*3,2); }
+    for (int i=0;i<16;i++) {
+        DWORD row=offset+i*16;
         set_attr(TUI_WHITE,TUI_BLUE);
-        putxyn("                        ",a->x+1,a->y+i+1,24);
-    }
-    for (DWORD i=0; i<18; i++) {
-        if (i>=filelist_length)break;
-        if (focus==a->index) {
-            if (i==index) {
-                set_attr(TUI_BLACK,TUI_WHITE);
-            } else {
-                set_attr(TUI_WHITE,TUI_BLUE);
+        hex_xlat(row,text,8); putxy(text,1,3+i);
+        for (int j=0;j<16;j++) {
+            DWORD pos=row+j;
+            set_attr(pos==hex_cursor ? TUI_BLACK : TUI_WHITE,
+                     pos==hex_cursor ? TUI_WHITE : TUI_BLUE);
+            if (pos<hex_length)hex_xlat(hex_buffer[pos],text,2);
+            else { text[0]='-'; text[1]='-'; text[2]=0; }
+            if (pos==hex_cursor && hex_digits) {
+                hex_xlat(hex_pending,text,2);
+                if (hex_digits==1)text[0]='_';
             }
-        } else {
-            set_attr((i==index)?(TUI_WHITE|TUI_LIGHT):TUI_WHITE,TUI_BLUE);
+            putxy(text,11+j*3,3+i);
+            set_attr(TUI_WHITE,TUI_BLUE);
+            putxyc(pos<hex_length ? to_avail(hex_buffer[pos]) : ' ',61+j,3+i);
         }
-        putxyn("                        ",a->x+1,a->y+i+1,24);
-        putxyn(filelist_ptr[i].name,a->x+1,a->y+1+i,8);
-        if (filelist_ptr[i].attr&0x10) {
-            putxyn("<DIR>",a->x+9,a->y+1+i,5);
-        } else {
-            putxyn(filelist_ptr[i].name+8,a->x+10,a->y+1+i,3);
-        }
-        hex_xlat(filelist_ptr[i].cluster,tstrdw,8);
-        putxy(tstrdw,a->x+16,a->y+1+i);
     }
-    subproc_fi(&area_file_info,index);
+    set_attr(TUI_WHITE,TUI_BLUE);
+    putxy(hex_message ? hex_message : "",1,20);
+    putxy("ERR=",1,21); hex_xlat((DWORD)hex_error,text,8); putxy(text,5,21);
+    putxy("WRITTEN=",17,21); hex_xlat(hex_written,text,8); putxy(text,25,21);
+    putxy("ARROWS / PGUP / PGDN / HOME / END: move   HEX HEX + ENTER: commit",1,23);
+    putxy("F1=RELOAD  F2=SAVE  ESC/F3=EXIT  Limit=64 KiB",1,24);
+    if (hex_confirm)putxy("Discard edits? Y=yes  N/ESC=no",1,22);
+}
+
+static void proc_hex(DWORD key) {
+    if (hex_confirm) {
+        if (key=='y' || key=='Y') {
+            int action=hex_confirm;
+            hex_confirm=0;
+            if (action==2) { hex_close(); return; }
+            hex_error=hex_load(hex_path);
+            if (hex_error)hex_message="RELOAD FAILED; edits retained";
+        } else if (key=='n' || key=='N' || key==VK_ESC)hex_confirm=0;
+        hex_draw(); return;
+    }
+    if (key==VK_ESC && hex_digits) { hex_digits=hex_pending=0; }
+    else if (key==VK_ESC || key==VK_F3) {
+        if (hex_dirty || hex_digits)hex_confirm=2;
+        else { hex_close(); return; }
+    } else if (key==VK_F1) {
+        if (hex_dirty || hex_digits)hex_confirm=1;
+        else {
+            hex_error=hex_load(hex_path);
+            if (hex_error)hex_message="RELOAD FAILED; buffer retained";
+        }
+    } else if (key==VK_F2)hex_save();
+    else if (key==VK_ENTER && hex_digits==2) {
+        if (!(hex_file->attr & 1) && hex_cursor<HEX_CAPACITY) {
+            if (hex_cursor>=hex_length) {
+                memzero(hex_buffer+hex_length,hex_cursor+1-hex_length);
+                hex_length=hex_cursor+1;
+                hex_dirty=1;
+            }
+            if (hex_buffer[hex_cursor]!=(BYTE)hex_pending)hex_dirty=1;
+            hex_buffer[hex_cursor]=(BYTE)hex_pending;
+        }
+        hex_digits=hex_pending=0;
+    } else if (key<0x100 && hex_digit((char)key)!=0xff) {
+        if (hex_file->attr & 1)hex_message="READ ONLY";
+        else if (hex_digits<2) {
+            hex_pending=(hex_pending<<4)|hex_digit((char)key);
+            hex_digits++;
+        }
+    } else {
+        DWORD old=hex_cursor;
+        switch (key) {
+            case VK_LEFT: if (hex_cursor)hex_cursor--; break;
+            case VK_RIGHT: if (hex_cursor<HEX_CAPACITY-1)hex_cursor++; break;
+            case VK_UP: if (hex_cursor>=16)hex_cursor-=16; break;
+            case VK_DOWN: if (hex_cursor<HEX_CAPACITY-16)hex_cursor+=16; break;
+            case VK_PGUP: hex_cursor=hex_cursor>=256 ? hex_cursor-256 : 0; break;
+            case VK_PGDN: hex_cursor=hex_cursor<HEX_CAPACITY-256 ? hex_cursor+256 : HEX_CAPACITY-1; break;
+            case VK_HOME: hex_cursor=0; break;
+            case VK_END: hex_cursor=hex_length<HEX_CAPACITY ? hex_length : HEX_CAPACITY-1; break;
+        }
+        if (old!=hex_cursor)hex_digits=hex_pending=0;
+    }
+    hex_draw();
+}
+
+static void subproc_fi(PTUI_AREA a, DWORD fileindex) {
+    char text[9];
+    set_attr(TUI_WHITE,TUI_BLUE);
+    for (DWORD y=1;y<a->h;y++)putxy("         ",a->x+1,a->y+y);
+    if (fileindex>=filelist_length)return;
+    const SFT_T *entry=&filelist_ptr[fileindex];
+    putxy("LENGTH",a->x+1,a->y+1);
+    hex_xlat(entry->length,text,8); putxy(text,a->x+1,a->y+2);
+    putxy("CLUSTER",a->x+1,a->y+3);
+    hex_xlat(entry->cluster,text,8); putxy(text,a->x+1,a->y+4);
+    putxy("ATTR",a->x+1,a->y+5);
+    bin_xlat(entry->attr,text,8); putxy(text,a->x+1,a->y+6);
+    putxy("CURRENT",a->x+1,a->y+7);
+    hex_xlat(fe_current_cluster,text,8); putxy(text,a->x+1,a->y+8);
+}
+
+static void proc_fe(PTUI_AREA a, DWORD ctrl) {
+    char text[9];
+    set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE);
+    if (focus==a->index) {
+        putxy("F5=REFRESH  F2/ENTER=ENTER DIR  F6=HEX EDITOR  UP/DOWN=SELECT",0,23);
+        switch (ctrl) {
+            case VK_F5: proc_fe_update_list(); break;
+            case VK_UP: if (fe_index)fe_index--; break;
+            case VK_DOWN: if (fe_index+1<filelist_length)fe_index++; break;
+            case VK_F6:
+                if (fe_index<filelist_length)hex_open(&filelist_ptr[fe_index]);
+                break;
+            case VK_ENTER:
+            case VK_F2:
+                if (fe_index<filelist_length && (filelist_ptr[fe_index].attr & 0x10)) {
+                    char path[256];
+                    SFT_T target;
+                    int err=fe_entry_path(&filelist_ptr[fe_index],path);
+                    if (!err)err=fs_lookup(&monitor_fs,path,&target);
+                    if (err) { fe_error=err; break; }
+                    strcpy(fe_path,path);
+                    fe_current_cluster=target.cluster;
+                    proc_fe_update_list();
+                }
+                break;
+        }
+    }
+    DWORD top=(fe_index/18)*18;
+    for (DWORD row=0;row<18;row++) {
+        DWORD i=top+row;
+        set_attr(TUI_WHITE,TUI_BLUE);
+        putxy("                          ",a->x+1,a->y+1+row);
+        if (i>=filelist_length)continue;
+        if (i==fe_index)set_attr(focus==a->index ? TUI_BLACK : TUI_WHITE|TUI_LIGHT,
+                                focus==a->index ? TUI_WHITE : TUI_BLUE);
+        putxyn(filelist_ptr[i].name,a->x+1,a->y+1+row,8);
+        if (filelist_ptr[i].attr & 0x10)putxy("<DIR>",a->x+9,a->y+1+row);
+        else putxyn(filelist_ptr[i].name+8,a->x+10,a->y+1+row,3);
+        hex_xlat(filelist_ptr[i].cluster,text,8);
+        putxy(text,a->x+16,a->y+1+row);
+    }
+    set_attr(TUI_WHITE,TUI_BLUE);
+    putxy("                          ",a->x+1,a->y+19);
+    putxy("                          ",a->x+1,a->y+20);
+    if (fe_error) {
+        putxy("ERR=",a->x+1,a->y+19);
+        hex_xlat((DWORD)fe_error,text,8); putxy(text,a->x+5,a->y+19);
+    } else if (fe_truncated)putxy("FIRST 256 ENTRIES ONLY",a->x+1,a->y+19);
+    else if (!filelist_length)putxy("EMPTY DIRECTORY",a->x+1,a->y+19);
+    if (fe_message)putxy(fe_message,a->x+1,a->y+20);
+    subproc_fi(&area_file_info,fe_index);
 }
 static void proc_md(PTUI_AREA a, DWORD ctrl) {
     static int index=0; // 放两排dump
@@ -607,7 +789,8 @@ void tui_init() {
     area_file_expl.index=3;
 
     fe_current_cluster=monitor_fs.root_cluster;
-    filelist_ptr=0;
+    strcpy(fe_path, "/");
+    fe_index=0;
     proc_fe_update_list();
 
     menu_index=2;
@@ -625,7 +808,15 @@ void tui_clr() {
         video[80*23+i]=((WORD)vi_attr)<<8;
     }
 }
+void tui_draws(void);
 void tui_procs(DWORD t) {
+    if (hex_active) {
+        proc_hex(t);
+        if (hex_active)return;
+        t=0;
+        draw_menu();
+        tui_draws();
+    }
     tui_clr();
     proc_menu(t);
     switch (tuim_page) {
@@ -633,11 +824,13 @@ void tui_procs(DWORD t) {
             proc_mr(&area_mem_reader,t);
             proc_md(&area_mem_dump,t);
             proc_fe(&area_file_expl,t);
+            if (hex_active) hex_draw();
             break;
         }
     }
 }
 void tui_draws() {
+    if (hex_active)return;
     switch (tuim_page) {
         case 0: {
             draw_area(&area_mem_reader);
@@ -652,14 +845,14 @@ void tui_loop() {
     DWORD t=0;
     tui_draws();
     while (1) {
-        switch (t) {
+        switch (hex_active ? 0 : t) {
             case VK_TAB: {
                 focus++;
                 focus%=4;
                 break;
             }
         }
-        draw_menu();
+        if (!hex_active)draw_menu();
         tui_draws();
         tui_procs(t);
         t=lw_getk();

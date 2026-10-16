@@ -203,3 +203,16 @@ clean:
 .PHONY: all resetimg run clean fsroot webimg test-fs test-fs-dir test-fs-file test-fs-write compdb
 
 -include $(shell find $(BUILD_DIR) -name '*.d' 2>/dev/null)
+
+TUI_HEX_TEST = $(BUILD_DIR)/tests/tui_hex_test
+$(TUI_HEX_TEST): tests/tui_hex_test.c app/monitor/src/tui.c $(wildcard lib/include/*.h) \
+    app/monitor/include/tui.h app/monitor/include/keys.h \
+    lib/src/fs.c lib/src/mem.c lib/src/string.c lib/src/convert.c
+	@mkdir -p $(@D)
+	gcc -std=gnu11 -fno-builtin -ffunction-sections -fdata-sections \
+	    -Wl,--gc-sections -Ilib/include tests/tui_hex_test.c \
+	    lib/src/fs.c lib/src/mem.c lib/src/string.c lib/src/convert.c -o $@
+
+test-tui-hex: $(TUI_HEX_TEST)
+	$(TUI_HEX_TEST)
+.PHONY: test-tui-hex
