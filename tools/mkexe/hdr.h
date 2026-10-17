@@ -85,4 +85,24 @@ typedef struct _SECT32_HDR {
     unsigned int sh_ensz;   // +24h
 } SECT32_HDR, *PSECT32_HDR;
 
+#define SHT_SYMTAB 2
+#define SHT_RELA 4
+#define SHT_NOBITS 8
+#define SHT_REL 9
+#define SHF_ALLOC 2
+#define SHN_UNDEF 0
+#define SHN_ABS 0xfff1
+#define R_386_32 1
+#define R_386_PC32 2
+
+typedef struct {
+    unsigned int r_offset, r_info;
+} REL32;
+
+typedef struct {
+    unsigned int st_name, st_value, st_size;
+    unsigned char st_info, st_other;
+    unsigned short st_shndx;
+} SYM32;
+
 #endif

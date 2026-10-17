@@ -21,15 +21,15 @@ static PRM_IMAGE image_acquire(void)
 }
 
 int resman_image_load(PCVOID file, DWORD file_size, WORD owner, PRM_IMAGE *out) {
+    if (!out)return -1;
+    *out=0;
+    if (!file)return -1;
     if (file_size<sizeof(LwpHdr)) {
         return -1; // size mismatch
     }
     PRM_IMAGE pimg;
-    PLwpHdr plhdr=file;
+    const LwpHdr *plhdr=file;
     PVOID base=0,stack=0;
-
-    if (!file || !out)return -1;
-    *out=0;
 
     if (plhdr->magic != LWP_MAGIC)return -2;
     if (plhdr->version != LWP_VERSION)return -3;
@@ -43,6 +43,22 @@ int resman_image_load(PCVOID file, DWORD file_size, WORD owner, PRM_IMAGE *out) 
     if (plhdr->reloc_off > file_size)return -10;
     if (plhdr->reloc_count > (file_size-plhdr->reloc_off)/sizeof(LwpReloc))return -10;
 
+    /* 先验证整张表, 避免分配后才发现错误。表项及修正位置均可未对齐。 */
+    PCBYTE relocs=(PCBYTE)file+plhdr->reloc_off;
+    for (DWORD i=0; i<plhdr->reloc_count; i++) {
+        DWORD rva;
+        memcpy(&rva, relocs+i*sizeof(LwpReloc), sizeof(rva));
+        if (plhdr->image_size<sizeof(DWORD) ||
+            rva>plhdr->image_size-sizeof(DWORD))return -10;
+        /* 不要求输入表有序, 但同一个字不能被修正两次。 */
+        for (DWORD j=0; j<i; j++) {
+            DWORD previous;
+            memcpy(&previous, relocs+j*sizeof(LwpReloc), sizeof(previous));
+            if ((rva>=previous ? rva-previous : previous-rva)<sizeof(DWORD))
+                return -10;
+        }
+    }
+
     pimg=image_acquire();
     if (!pimg)return -11;
 
@@ -55,6 +71,15 @@ int resman_image_load(PCVOID file, DWORD file_size, WORD owner, PRM_IMAGE *out) 
     }
     memcpy(base,(PCBYTE)file+plhdr->image_off,plhdr->image_size);
     memzero((PBYTE)base+plhdr->image_size,plhdr->mem_size-plhdr->image_size);
+
+    /* 文件内已保存链接到 0 的地址; 每个指定的 32 位字只加一次加载基址。 */
+    for (DWORD i=0; i<plhdr->reloc_count; i++) {
+        DWORD rva, value;
+        memcpy(&rva, relocs+i*sizeof(LwpReloc), sizeof(rva));
+        memcpy(&value, (PBYTE)base+rva, sizeof(value));
+        value+=(DWORD)base;
+        memcpy((PBYTE)base+rva, &value, sizeof(value));
+    }
 
     pimg->base=base;
     pimg->image_size=plhdr->image_size;

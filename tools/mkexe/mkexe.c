@@ -49,6 +49,13 @@ int write_file(const char* path, MkexeImage* in) {
         failed = 1;
     }
 
+    for (uint32_t i=0; !failed && i<in->header.reloc_count; i++) {
+        uint32_t rva=in->relocs[i];
+        unsigned char le[4]={rva, rva>>8, rva>>16, rva>>24};
+        if (fwrite(le, 1, sizeof(le), fp)!=sizeof(le))
+            failed=1;
+    }
+
     if (fclose(fp) != 0)
         failed = 1;
 
@@ -65,6 +72,120 @@ static PELF32_HDR p_hdr;
 static PPROG32_HDR p_prog;
 static PSECT32_HDR p_sect;
 static PSECT32_HDR p_nmse;
+
+static int file_range(const MkexeBuffer *buf, uint32_t off, uint32_t size) {
+    return off<=buf->size && size<=buf->size-off;
+}
+
+static SECT32_HDR section_at(const MkexeBuffer *buf, unsigned int index) {
+    SECT32_HDR section;
+    memcpy(&section, buf->data+p_hdr->e_shoff+(size_t)index*p_hdr->e_shsz,
+           sizeof(section));
+    return section;
+}
+
+static int compare_rva(const void *a, const void *b) {
+    uint32_t x=*(const uint32_t *)a, y=*(const uint32_t *)b;
+    return (x>y)-(x<y);
+}
+
+/* ET_EXEC 已由 ld 完成 S+A / S+A-P 的计算。这里仅记录加载时
+ * 还要加 base 的位置 r_offset, 不能再次把符号值加到映像中。 */
+static int collect_relocs(const MkexeBuffer *buf, MkexeImage *img) {
+    size_t capacity=0;
+    for (unsigned int i=0; i<p_hdr->e_shnm; i++) {
+        SECT32_HDR relsec=section_at(buf, i);
+        if (relsec.sh_type!=SHT_REL && relsec.sh_type!=SHT_RELA)
+            continue;
+        if (relsec.sh_info>=p_hdr->e_shnm)
+            goto invalid;
+        SECT32_HDR target=section_at(buf, relsec.sh_info);
+        /* 调试节等非装载内容不属于 LWP 映像。 */
+        if (!(target.sh_flags&SHF_ALLOC))continue;
+        if (relsec.sh_type!=SHT_REL || relsec.sh_ensz!=sizeof(REL32) ||
+            relsec.sh_size%sizeof(REL32) ||
+            !file_range(buf, relsec.sh_offset, relsec.sh_size) ||
+            relsec.sh_link>=p_hdr->e_shnm || target.sh_type==SHT_NOBITS)
+            goto invalid;
+        SECT32_HDR symsec=section_at(buf, relsec.sh_link);
+        if (symsec.sh_type!=SHT_SYMTAB || symsec.sh_ensz!=sizeof(SYM32) ||
+            symsec.sh_size%sizeof(SYM32) ||
+            !file_range(buf, symsec.sh_offset, symsec.sh_size))
+            goto invalid;
+        for (size_t off=0; off<relsec.sh_size; off+=sizeof(REL32)) {
+            REL32 rel;
+            SYM32 sym;
+            memcpy(&rel, buf->data+relsec.sh_offset+off, sizeof(rel));
+            uint32_t type=rel.r_info&0xff, symidx=rel.r_info>>8;
+            if (symidx>=symsec.sh_size/sizeof(SYM32))goto invalid;
+            memcpy(&sym, buf->data+symsec.sh_offset+(size_t)symidx*sizeof(sym),
+                   sizeof(sym));
+            if (type!=R_386_32 && type!=R_386_PC32) {
+                fprintf(stderr, "unsupported relocation type %u at %08X\n",
+                        type, rel.r_offset);
+                return -1;
+            }
+            if (sym.st_shndx==SHN_UNDEF) {
+                fprintf(stderr, "undefined relocation symbol %u\n", symidx);
+                return -1;
+            }
+            if (rel.r_offset<target.sh_addr || target.sh_size<4 ||
+                rel.r_offset-target.sh_addr>target.sh_size-4 ||
+                img->header.image_size<4 || rel.r_offset>img->header.image_size-4)
+                goto invalid;
+            int loaded=0;
+            for (unsigned int j=0; j<p_hdr->e_phnm; j++) {
+                PROG32_HDR prog;
+                memcpy(&prog, buf->data+p_hdr->e_phoff+(size_t)j*p_hdr->e_phsz,
+                       sizeof(prog));
+                if (prog.p_type==PT_LOAD && prog.p_filesz>=4 &&
+                    rel.r_offset>=prog.p_va &&
+                    rel.r_offset-prog.p_va<=prog.p_filesz-4)
+                    loaded=1;
+            }
+            if (!loaded)goto invalid;
+            /* SHN_ABS 是不随映像移动的常量; 对它的 PC32 无法用 +base 表示。 */
+            if (sym.st_shndx==SHN_ABS) {
+                if (type==R_386_32)continue;
+                goto invalid;
+            }
+            if (sym.st_shndx>=p_hdr->e_shnm)goto invalid;
+            SECT32_HDR definition=section_at(buf, sym.st_shndx);
+            if (!(definition.sh_flags&SHF_ALLOC))goto invalid;
+            if (type==R_386_PC32)continue;
+            if (img->header.reloc_count==capacity) {
+                size_t next=capacity ? capacity*2 : 64;
+                if (next>UINT32_MAX/sizeof(uint32_t))goto invalid;
+                uint32_t *items=realloc(img->relocs, next*sizeof(*items));
+                if (!items) {
+                    fprintf(stderr, "out of memory collecting relocations\n");
+                    return -1;
+                }
+                img->relocs=items;
+                capacity=next;
+            }
+            img->relocs[img->header.reloc_count++]=rel.r_offset;
+        }
+    }
+    if (img->header.reloc_count) {
+        qsort(img->relocs, img->header.reloc_count, sizeof(*img->relocs), compare_rva);
+        for (uint32_t i=1; i<img->header.reloc_count; i++) {
+            if (img->relocs[i]-img->relocs[i-1]<4) {
+                fprintf(stderr, "duplicate or overlapping relocation at %08X\n",
+                        img->relocs[i]);
+                return -1;
+            }
+        }
+        if (img->header.image_size>UINT32_MAX-img->header.image_off)goto invalid;
+        img->header.reloc_off=img->header.image_off+img->header.image_size;
+        if (img->header.reloc_count>(UINT32_MAX-img->header.reloc_off)/4)
+            goto invalid;
+    }
+    return 0;
+invalid:
+    fprintf(stderr, "invalid or unsupported ELF relocation\n");
+    return -1;
+}
 const char ph_str[][8] = {
     "PT_NULL",
     "PT_LOAD"
@@ -144,11 +265,24 @@ int main(int argc, char **argv) {
         printf(" Refactory mode\n");
         p_hdr=(PELF32_HDR)(buf.data);
 
+        if (buf.size<sizeof(*p_hdr) || memcmp(p_hdr->e_id, "\177ELF", 4) ||
+            p_hdr->e_id[EI_CLASS]!=1 || p_hdr->e_id[EI_DATA]!=1 ||
+            p_hdr->e_type!=ET_EXEC || p_hdr->e_mach!=ISA_X86 ||
+            p_hdr->e_phsz!=sizeof(PROG32_HDR) ||
+            p_hdr->e_shsz!=sizeof(SECT32_HDR) ||
+            !file_range(&buf, p_hdr->e_phoff, (uint32_t)p_hdr->e_phnm*p_hdr->e_phsz) ||
+            !file_range(&buf, p_hdr->e_shoff, (uint32_t)p_hdr->e_shnm*p_hdr->e_shsz)) {
+            fprintf(stderr, "invalid ELF32/i386 executable\n");
+            free(buf.data);
+            return 1;
+        }
+
         for (int i=0; i<p_hdr->e_phnm; i++) {
             p_prog=(PPROG32_HDR)(buf.data+p_hdr->e_phoff+p_hdr->e_phsz*i);
             if (p_prog->p_type!=PT_LOAD)continue;
             
             if (p_prog->p_filesz > p_prog->p_memsz ||
+                !file_range(&buf, p_prog->p_offset, p_prog->p_filesz) ||
                 p_prog->p_va > UINT32_MAX - p_prog->p_memsz) {
                 fprintf(stderr, "invalid PT_LOAD\n");
                 return 1;
@@ -167,7 +301,7 @@ int main(int argc, char **argv) {
         img.header.magic=LWP_MAGIC;
         img.header.version=LWP_VERSION;
         img.header.hdr_size=sizeof(img.header);
-        img.header.entry=0;
+        img.header.entry=p_hdr->e_entry;
         img.header.image_off=0x40;
         img.header.image_size=image_size;
         img.header.mem_size=mem_size;
@@ -185,7 +319,11 @@ int main(int argc, char **argv) {
         printf("LWP_IMAGE_SIZE=%08X\n", img.header.image_size);
         printf("LWP_MEM_SIZE=%08X\n", img.header.mem_size);
 
-        img.image=(unsigned char*)malloc(image_size);
+        img.image=(unsigned char*)malloc(image_size ? image_size : 1);
+        if (!img.image) {
+            free(buf.data);
+            return 1;
+        }
         memset(img.image,0,image_size);
 
         for (int i=0; i<p_hdr->e_phnm; i++) {
@@ -198,13 +336,16 @@ int main(int argc, char **argv) {
             );
         }
 
-        if (write_file(argv[2], &img)) {
-            return 1;
-        } else {
-            return 0;
+        int failed=collect_relocs(&buf, &img);
+        if (!failed) {
+            printf("LWP_RELOC_OFF=%08X\n", img.header.reloc_off);
+            printf("LWP_RELOC_COUNT=%u\n", img.header.reloc_count);
+            failed=write_file(argv[2], &img);
         }
-
-        return 0;
+        free(img.relocs);
+        free(img.image);
+        free(buf.data);
+        return failed ? 1 : 0;
     }
     return 1;
 }
