@@ -393,6 +393,7 @@ static void proc_fe(PTUI_AREA a, DWORD ctrl) {
         putxy("F4=EXECUTE",0,24);
         switch (ctrl) {
             case VK_F4: {
+                DWORD exit_code=0;
                 if (fe_index>=filelist_length)break;
                 if (filelist_ptr[fe_index].attr&0x10)break;
                 memzero(path,256);
@@ -437,6 +438,32 @@ static void proc_fe(PTUI_AREA a, DWORD ctrl) {
                 }
                 fs_file_close(&exe_file);
                 err=rm_image_load(exe_file_buf,exe_length,RM_OWNER_SYSTEM,&exe_image);
+                if (err) {
+                    memcpy(text,"ERR LOAD",9);
+                    hex_xlat(err,text+8,8);
+                    showmessage(text);
+                    kfree(exe_file_buf);
+                    break;
+                }
+                err=rm_image_run(exe_image,0,&exit_code);
+                if (err) {
+                    memcpy(text,"ERR RUN ",9);
+                    hex_xlat(err,text+8,8);
+                    showmessage(text);
+                    kfree(exe_file_buf);
+                    break;
+                }
+                memcpy(text,"EXIT WITH ",10);
+                hex_xlat(exit_code,text+10,8);
+                showmessage(text);
+                err=rm_image_unload(exe_image);
+                if (err) {
+                    memcpy(text,"ERR UNLOAD ",11);
+                    hex_xlat(err,text+11,8);
+                    showmessage(text);
+                    kfree(exe_file_buf);
+                    break;
+                }
                 break;
             }
             case VK_F5: proc_fe_update_list(); break;

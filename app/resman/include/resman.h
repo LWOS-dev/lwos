@@ -8,8 +8,9 @@
 
 enum {
     RM_IMAGE_FREE = 0,
-    RM_IMAGE_LOADED = 1,
-    RM_IMAGE_RUNNING = 2
+    RM_IMAGE_LOADING = 1,
+    RM_IMAGE_LOADED = 2,
+    RM_IMAGE_RUNNING = 3
 };
 
 struct _RM_IMAGE {
