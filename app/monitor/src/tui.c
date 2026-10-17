@@ -954,6 +954,9 @@ void tui_loop() {
                 break;
             }
         }
+        for (int i=0; i<80*25; i++) {
+            video[i]=0x1020;
+        }
         if (!hex_active)draw_menu();
         tui_draws();
         tui_procs(t);

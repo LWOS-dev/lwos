@@ -84,7 +84,8 @@ const PVOID lw_abi[LW_SLOT_COUNT] __attribute__((section(".abi"), used, aligned(
     [LW_SLOT_BLK_COUNT]         = (PVOID)blkdev_count,
     [LW_SLOT_BLK_GET]           = (PVOID)blkdev_get,
 
-    [LW_SLOT_RESV_ENTRY]        = (PVOID)binfo_dump
+    [LW_SLOT_RESV_ENTRY]        = (PVOID)binfo_dump,
+    [LW_SLOT_TRAMP_CALL]        = (PVOID)tramp_call
 };
 
 /* 自己清自己的 bss, 调用方不需要知道 ABI.BIN 的内存布局 */

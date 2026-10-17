@@ -67,6 +67,7 @@ include app/test1/build.mk
 
 # mkexe 测试程序: test.c -> test.elf -> test.exe -> 镜像根目录 /TEST.EXE。
 include tools/mkexe/build.mk
+include external/build.mk
 FSROOT_FILES += $(FSROOT)/TEST.EXE
 $(FSROOT)/TEST.EXE: $(MKEXE_TEST_EXE)
 
@@ -95,8 +96,8 @@ endif
 
 # ---------------------------------------------------------------- 通用
 # 逐文件编译参数供 VS Code C/C++ 和 clangd 使用, 区分裸机与宿主工具。
-EDITOR_SOURCES := $(shell find lib app loader tools tests -name '*.c' 2>/dev/null)
-EDITOR_MAKEFILES := $(wildcard boot/build.mk loader/build.mk lib/build.mk lib/*/build.mk app/*/build.mk)
+EDITOR_SOURCES := $(shell find lib app loader tools tests external -name '*.c' 2>/dev/null)
+EDITOR_MAKEFILES := $(wildcard boot/build.mk loader/build.mk lib/build.mk lib/*/build.mk app/*/build.mk external/build.mk)
 compile_commands.json: makefile $(EDITOR_MAKEFILES) $(EDITOR_SOURCES) tools/gen_compile_commands.py
 	python3 tools/gen_compile_commands.py
 

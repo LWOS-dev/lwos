@@ -91,6 +91,9 @@ enum {
 
     LW_SLOT_RESV_ENTRY          = 0x7f,
 
+    /* PM -> RM -> INT 10h -> PM; 仅用于低频 BIOS 视频调用。 */
+    LW_SLOT_TRAMP_CALL          = 0x80,
+
     LW_SLOT_COUNT
 };
 
@@ -133,6 +136,7 @@ extern PVOID *lw_abi_base;
 #define lw_gfx_enter    LW_CALL(LW_SLOT_IO_VIDEO_ENTER,     int (*)(void))
 #define lw_gfx_exit     LW_CALL(LW_SLOT_IO_VIDEO_EXIT,      void (*)(void))
 #define lw_gfx_is_live  LW_CALL(LW_SLOT_IO_VIDEO_LIVE,      int (*)(void))
+#define lw_tramp_call   LW_CALL(LW_SLOT_TRAMP_CALL,         WORD (*)(WORD, WORD, WORD, WORD))
 #define lw_fpu_init     LW_CALL(LW_SLOT_IO_FPU_INIT,        void (*)(void))
 
 #define lw_get_fb       LW_CALL(LW_SLOT_INFO_FB,            DWORD (*)(void))

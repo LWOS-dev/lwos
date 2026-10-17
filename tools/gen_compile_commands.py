@@ -15,7 +15,7 @@ environment.pop("MAKEFLAGS", None)
 environment.pop("MFLAGS", None)
 result = subprocess.run(
     ["make", "--no-print-directory", "-Bn",
-     "bin/abi.elf", "bin/monitor.elf", "bin/loader.elf"],
+     "bin/abi.elf", "bin/monitor.elf", "bin/loader.elf", "external"],
     cwd=root, env=environment, text=True, capture_output=True, check=True,
 )
 commands = {}
