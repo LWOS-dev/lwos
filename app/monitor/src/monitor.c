@@ -15,6 +15,7 @@
 #include "resman.h"
 
 PVOID *lw_abi_base;
+PVOID *rm_base=0;
 FS_VOLUME monitor_fs;
 
 /* ABI 不可用时连 puts 都没有, 只能直接写显存 */
@@ -101,6 +102,7 @@ static void start_resman(void)
         prepared = 1;
     }
     int result = ((RESMAN_ENTRY)entry)(lw_abi_base);
+    rm_base=(result==RM_OK)?head:0;
     lw_puts("RESMAN RETURNED: ");
     lw_put_dword((DWORD)result);
     lw_puts("\n\r");

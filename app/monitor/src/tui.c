@@ -6,8 +6,11 @@
 #include "string.h"
 #include "convert.h"
 #include "mem.h"
+#include "lwp.h"
+#include "resman.h"
 
 PWORD video;
+PWORD subvideo;
 BYTE vi_attr;
 DWORD focus;
 
@@ -293,7 +296,6 @@ static void hex_draw(void) {
     putxy("F1=RELOAD  F2=SAVE  ESC/F3=EXIT  Limit=64 KiB",1,24);
     if (hex_confirm)putxy("Discard edits? Y=yes  N/ESC=no",1,22);
 }
-
 static void proc_hex(DWORD key) {
     if (hex_confirm) {
         if (key=='y' || key=='Y') {
@@ -349,7 +351,6 @@ static void proc_hex(DWORD key) {
     }
     hex_draw();
 }
-
 static void subproc_fi(PTUI_AREA a, DWORD fileindex) {
     char text[9];
     set_attr(TUI_WHITE,TUI_BLUE);
@@ -365,13 +366,79 @@ static void subproc_fi(PTUI_AREA a, DWORD fileindex) {
     putxy("CURRENT",a->x+1,a->y+7);
     hex_xlat(fe_current_cluster,text,8); putxy(text,a->x+1,a->y+8);
 }
-
+static void showmessage(const char* ctx) {
+    memcpy(subvideo,video,80*25*sizeof(WORD));
+    int window_width=strlen(ctx)+4;
+    set_attr(TUI_BLACK,TUI_WHITE);
+    for (int i=0; i<window_width; i++) {
+        for (int j=0; j<3; j++) {
+            putxyc(' ',40-window_width/2+i,11+j);
+        }
+    }
+    putxy(ctx,40-window_width/2+2,12);
+    lw_getk();
+    memcpy(video,subvideo,80*25*sizeof(WORD));
+}
+PBYTE exe_file_buf;
+DWORD exe_length;
+DWORD exe_read_cnt;
+FS_FILE exe_file;
+PRM_IMAGE exe_image=0;
 static void proc_fe(PTUI_AREA a, DWORD ctrl) {
-    char text[9];
+    char text[100];
+    char path[256];
     set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE);
     if (focus==a->index) {
         putxy("F5=REFRESH  F2/ENTER=ENTER DIR  F6=HEX EDITOR  UP/DOWN=SELECT",0,23);
+        putxy("F4=EXECUTE",0,24);
         switch (ctrl) {
+            case VK_F4: {
+                if (fe_index>=filelist_length)break;
+                if (filelist_ptr[fe_index].attr&0x10)break;
+                memzero(path,256);
+                if (fe_entry_path(&filelist_ptr[fe_index],path))break;
+                showmessage(path);
+                exe_read_cnt=0;
+                exe_length=0;
+                memzero(&exe_file,sizeof(FS_FILE));
+                int err;
+                err=fs_file_open(&monitor_fs,path,&exe_file);
+                if (err) {
+                    memcpy(text,"ERR FILE OPEN",13);
+                    hex_xlat(err,text+13,8);
+                    showmessage(text);
+                    break;
+                }
+                err=fs_file_size(&exe_file,&exe_length);
+                if (err) {
+                    memcpy(text,"ERR FILE SIZE",13);
+                    hex_xlat(err,text+13,8);
+                    showmessage(text);
+                    break;
+                }
+                if (exe_length<sizeof(LwpHdr)) {
+                    showmessage("INVALID EXE FILE");
+                    break;
+                }
+                exe_file_buf=kmalloc(exe_length);
+                if (!exe_file_buf || 
+                    exe_file_buf==(PVOID)-1 || 
+                    exe_file_buf==(PVOID)-2) {
+                    exe_file_buf=0;
+                    showmessage("MEMORY FAULT");
+                    break;
+                }
+                memcpy(text,"ALLOCATED AT ",14);
+                hex_xlat((DWORD)exe_file_buf,text+13,8);
+                showmessage(text);
+                err=fs_file_read(&exe_file,exe_file_buf,exe_length,&exe_read_cnt);
+                if (!err&&exe_read_cnt!=exe_length) {
+                    showmessage("INFO MISMATCH");
+                }
+                fs_file_close(&exe_file);
+                err=rm_image_load(exe_file_buf,exe_length,RM_OWNER_SYSTEM,&exe_image);
+                break;
+            }
             case VK_F5: proc_fe_update_list(); break;
             case VK_UP: if (fe_index)fe_index--; break;
             case VK_DOWN: if (fe_index+1<filelist_length)fe_index++; break;
@@ -758,7 +825,15 @@ static void proc_mr(PTUI_AREA a, DWORD ctrl) {
 }
 void tui_init() {
     video=(PVOID)0xb8000;
+    subvideo=(PWORD)kmalloc(80*25*sizeof(WORD));
+    if (subvideo==(PVOID)-1 || subvideo==(PVOID)-2) {
+        set_attr(TUI_WHITE|TUI_LIGHT,TUI_RED);
+        putxy("OUT OF MEMORY DURING ALLOCATE SUBVIDEO BUFFER",10,20);
+        lw_getk();
+    }
     focus=0;
+    exe_file_buf=0;
+    for (int i=0; i<80*25; i++)video[i]=0x1020;
 
     area_mem_reader.x=6;
     area_mem_reader.y=1;

@@ -13,4 +13,5 @@ const PVOID lw_rm[LW_RM_SLOT_COUNT]
     [LW_RM_SLOT_BSS_END] = (PVOID)__bss_end,
     [LW_RM_SLOT_IDENT] = (PVOID)LW_RM_IDENT,
     [LW_RM_SLOT_VERSION] = (PVOID)resman_version,
+    [LW_RM_SLOT_IMAGE_LOAD] = (PVOID)resman_image_load,
 };

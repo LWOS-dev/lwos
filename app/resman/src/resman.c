@@ -4,7 +4,7 @@
 #include "task.h"
 #include "../include/tui.h"
 #include "../include/isr.h"
-#include "keyboard.h"
+#include "../include/keyboard.h"
 #include "convert.h"
 
 PVOID *lw_abi_base;
