@@ -1161,6 +1161,9 @@ static void proc_pl(PTUI_AREA a, DWORD ctrl) {
     putxy("F5=REFRESH      F6=DETECT",0,24);
     draw:
 }
+static void proc_mp(PTUI_AREA a, DWORD ctrl) { // 统计内存使用情况
+    ;
+}
 void tui_init() {
     video=(PVOID)0xb8000;
     subvideo=(PWORD)kmalloc(80*25*sizeof(WORD));
@@ -1269,7 +1272,7 @@ void tui_procs(DWORD t) {
             break;
         }
         case 3: {
-            proc_mp(&area_mem_pool);
+            proc_mp(&area_mem_pool,t);
             break;
         }
     }
@@ -1289,7 +1292,7 @@ void tui_draws() {
             draw_area(&area_pci_info);
             break;
         }
-        case 2: {
+        case 3: {
             draw_area(&area_mem_pool);
             break;
         }
