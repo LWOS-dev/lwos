@@ -15,7 +15,7 @@ SECTIONS
     __bss_end = .;
 
     ASSERT(ADDR(.rmtab) == 0x180000, "resman header must start at 0x180000")
-    ASSERT(SIZEOF(.rmtab) == 0x43 * 4, "resman slot table size mismatch")
+    ASSERT(SIZEOF(.rmtab) == 0x51 * 4, "resman slot table size mismatch")
     ASSERT(__bss_end <= 0x200000, "resman overlaps monitor")
 
     /DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) }

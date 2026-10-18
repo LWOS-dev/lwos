@@ -38,6 +38,7 @@ TUI_AREA area_mem_reader;
 TUI_AREA area_mem_dump;
 TUI_AREA area_file_info;
 TUI_AREA area_file_expl;
+TUI_AREA area_pci_list;
 
 static int menu_items=4;
 static int menu_index=0;
@@ -48,13 +49,14 @@ const char name_menu[][7]={
     "RESET",
     "HALT",
     "RCS",
-    "DEVICE"
+    "PCIDEV"
 };
 const char name_units[4][6]={" BYTE"," WORD","DWORD","QWORD"};
 const char name_area_mr[]="MEM READER";
 const char name_area_md[]="MEM DUMP";
 const char name_area_fi[]="FILE INFO";
 const char name_area_fe[]="FILE EXPLORER";
+const char name_area_pl[]="PCI LIST";
 
 void draw_area(PTUI_AREA p) {
     set_attr((focus==p->index)?(TUI_YELLOW|TUI_LIGHT):(TUI_WHITE),TUI_BLUE);
@@ -108,8 +110,12 @@ void proc_menu(DWORD ctrl) {
             if (menu_index>=menu_items)menu_index=menu_items-1;
             break;
         }
-        case 0x666: { // 暂不开放
-            tuim_page=menu_index;
+        case 0xa: {
+            if (menu_index<2)break;
+            tuim_page=menu_index-2;
+            break;
+        }
+        default: {
             break;
         }
     }
@@ -850,6 +856,42 @@ static void proc_mr(PTUI_AREA a, DWORD ctrl) {
         putxyn(type_buf,a->x+16,a->y+1+mat,type_ptr);
     }
 }
+typedef struct _PCI_BAR_INFO {
+    QWORD base,size;
+    DWORD raw_lo,raw_hi;
+    BYTE slot,slots,kind,prefetchable;
+    BYTE size_valid,state;
+} PCI_BAR_INFO, *PPCI_BAR_INFO;
+typedef struct _PCI_DEV_INFO {
+    BYTE bus,dev,func;
+    BYTE hdr_type;
+    WORD vender,device;
+    BYTE class_code,subclass,prog_if,revision;
+    WORD command,status; // capture
+    BYTE irq_line,irq_pin;
+    WORD subsys_vendor,subsys_device;
+    BYTE subsys_valid;
+    BYTE bar_count;
+    PCI_BAR_INFO bars[6];
+    BYTE cap_ptr;
+} PCI_DEV_INFO, *PPCI_DEV_INFO;
+PPCI_DEV_INFO ptr_devs; // 设备信息数组
+static void proc_pl(PTUI_AREA a, DWORD ctrl) {
+    CHAR tstrdw[9];
+    CHAR tstrqw[17];
+
+    if (focus!=a->index)goto draw;
+
+    set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE);
+    putxy("UP/DOWN=DEVICES",0,23);
+    draw:
+    // 第一次扫描只记录长度
+    if (ptr_devs) {
+        kfree(ptr_devs);
+        ptr_devs=0;
+    }
+    
+}
 void tui_init() {
     video=(PVOID)0xb8000;
     subvideo=(PWORD)kmalloc(80*25*sizeof(WORD));
@@ -860,6 +902,7 @@ void tui_init() {
     }
     focus=0;
     exe_file_buf=0;
+    ptr_devs=0;
     for (int i=0; i<80*25; i++)video[i]=0x1020;
 
     area_mem_reader.x=6;
@@ -889,6 +932,13 @@ void tui_init() {
     area_file_expl.h=21;
     area_file_expl.name=name_area_fe;
     area_file_expl.index=3;
+
+    area_pci_list.x=6;
+    area_pci_list.y=1;
+    area_pci_list.w=32;
+    area_pci_list.h=20;
+    area_pci_list.name=name_area_pl;
+    area_pci_list.index=1;
 
     fe_current_cluster=monitor_fs.root_cluster;
     strcpy(fe_path, "/");
@@ -929,6 +979,10 @@ void tui_procs(DWORD t) {
             if (hex_active) hex_draw();
             break;
         }
+        case 1: {
+            proc_pl(&area_pci_list,t);
+            break;
+        }
     }
 }
 void tui_draws() {
@@ -941,10 +995,15 @@ void tui_draws() {
             draw_area(&area_file_expl);
             break;
         }
+        case 1: {
+            draw_area(&area_pci_list);
+            break;
+        }
     }
 }
 void tui_loop() {
     DWORD t=0;
+    rm_alarm();
     tui_draws();
     while (1) {
         switch (hex_active ? 0 : t) {
@@ -957,9 +1016,9 @@ void tui_loop() {
         for (int i=0; i<80*25; i++) {
             video[i]=0x1020;
         }
-        if (!hex_active)draw_menu();
         tui_draws();
         tui_procs(t);
+        if (!hex_active)draw_menu();
         t=lw_getk();
     }
 }

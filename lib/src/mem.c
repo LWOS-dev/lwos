@@ -158,7 +158,7 @@ PVOID kmalloc(int size) {
     return (PVOID)-2; // out of memory
 }
 void kfree(PVOID ptr) {
-    if (ptr<0)return;
+    if (ptr<(PVOID)0)return;
 
     for (int i=0; i<MEM_POOL_MAX; i++) {
         if (mem_pool[i].unit_size==0)continue;

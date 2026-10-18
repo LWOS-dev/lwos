@@ -36,4 +36,6 @@ int resman_image_load(PCVOID file, DWORD file_size, WORD owner, PRM_IMAGE *out);
 int resman_image_run(PRM_IMAGE image, PCLW_ENV env, int *exit_code);
 int resman_image_unload(PRM_IMAGE image);
 
+void resman_alarm(void);
+
 #endif

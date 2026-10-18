@@ -16,4 +16,5 @@ const PVOID lw_rm[LW_RM_SLOT_COUNT]
     [LW_RM_SLOT_IMAGE_LOAD] = (PVOID)resman_image_load,
     [LW_RM_SLOT_IMAGE_RUN] = (PVOID)resman_image_run,
     [LW_RM_SLOT_IMAGE_UNLOAD] = (PVOID)resman_image_unload,
+    [LW_RM_SLOT_ALARM] = (PVOID)resman_alarm,
 };

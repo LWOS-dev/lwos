@@ -1,4 +1,4 @@
-#include "keyboard.h"
+#include "../include/keyboard.h"
 #include "abi.h"
 
 #define QUEUE_SIZE 128u
@@ -102,7 +102,7 @@ static void set_leds(BYTE value)
     unlock(flags);
 }
 
-int resman_keyboard_init(void)
+int resman_keyboard_init(void) // 初始化键盘 IRQ1
 {
     static const LW_KBD_SOURCE source={read_scan,wait_scan,set_leds};
     DWORD flags=lock();

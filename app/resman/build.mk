@@ -10,6 +10,7 @@ RM_OBJS := $(BUILD_DIR)/$(RM_DIR)/head.o \
            $(BUILD_DIR)/$(RM_DIR)/isr.o \
            $(BUILD_DIR)/$(RM_DIR)/interrupt.o \
            $(BUILD_DIR)/$(RM_DIR)/keyboard.o \
+		   $(BUILD_DIR)/$(RM_DIR)/pit.o \
            $(BUILD_DIR)/$(RM_DIR)/double_fault.o
 # resman 显式选择自己的库，使用 lib/build.mk 的 KERN 编译规则。
 # 初始化内存页分配器和 GDT；图形、UI、鼠标由应用按需链接。

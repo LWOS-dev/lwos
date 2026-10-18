@@ -5,6 +5,7 @@
 #include "../include/tui.h"
 #include "../include/isr.h"
 #include "../include/keyboard.h"
+#include "../include/pit.h"
 #include "convert.h"
 
 PVOID *lw_abi_base;
