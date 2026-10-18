@@ -106,6 +106,19 @@ def check(machine, fault):
             else:
                 raise RuntimeError('RESMAN IDT was not installed')
             qmp('stop')
+            # Task state belongs to RESMAN; the image header exports shared addresses.
+            task_table, current_slot = struct.unpack('<2I', memory(0x180000 + 0x53 * 4, 8))
+            assert task_table == RM['task']
+            assert current_slot == RM['current_task']
+            assert struct.unpack('<I', memory(current_slot, 4))[0] == task_table
+            assert struct.unpack('<2I', memory(task_table, 8)) == (0, 3)  # TASK_RUNNING
+            assert memory(RM['sys_gdtr'], 6) == bytes.fromhex('ffff00003600')
+            selector = struct.unpack('<H', memory(task_table + 0x38, 2))[0]
+            descriptor = memory(0x360000 + selector, 8)
+            tss_base = (struct.unpack_from('<H', descriptor, 2)[0]
+                        | descriptor[4] << 16 | descriptor[7] << 24)
+            assert tss_base == task_table + 0x3c
+            assert descriptor[5] == 0x8b  # LTR marked the bootstrap TSS busy.
             idt = memory(0x370000, 2048)
             old_idt = memory(MON['idt'], 48 * 8)
             entries = struct.unpack('<256I', memory(RM['resman_isr_table'], 1024))

@@ -11,8 +11,11 @@ monitor 启动时调用 RESMAN：首次清 BSS，初始化内存页分配器、G
 - 映像头、身份标识、版本 slot 和 monitor 的调用/返回路径。
 - `mmap_init()` 将 BIOS E820 表复制到本映像的 BSS。
 - 复用 `lib/src/mem.c` 的页位图和页分配器，低 4 MiB 不参与动态分配。
-- `lib/src/task.c` 在 `0x360000` 建立 GDT，保留与 stage2 一致的前五项。
+- `app/resman/src/task.c` 在 `0x360000` 建立 GDT，保留与 stage2 一致的前五项。
   GDTR 使用 packed 的六字节硬件格式（limit 在前，base 在后）。
+- 任务表、当前任务、GDT/IDT 状态和初始化归 RESMAN 所有，私有声明在 `include/task.h`。
+  `lib/src/task.c` 只保留无状态的描述符编解码。映像头 `TASK_TABLE` 槽保存数组首地址，
+  `TASK_CURRENT` 槽保存 `current_task` 指针变量的地址；Monitor 通过槽位读取共享状态。
 - `lib/include/task.h` 已定义 104 字节 TSS32、TASK 和任务状态。
 - GDT/IDT 描述符使用带布局注释的 packed 结构体；原 `lib/include/idt.h`
   和 `lib/src/idt.c` 已合并到 task。段编解码包含 access 和属性四位。

@@ -1,7 +1,7 @@
 #include "../include/resman.h"
 #include "abi.h"
 #include "mem.h"
-#include "task.h"
+#include "../include/task.h"
 #include "../include/tui.h"
 #include "../include/isr.h"
 #include "../include/keyboard.h"
@@ -31,14 +31,16 @@ int resman_main(PVOID *abi)
         idt_init(resman_isr_table);
         pic_init();
         if (resman_keyboard_init())return RM_ERR_NOT_READY;
+        if (resman_pit_init())return RM_ERR_NOT_READY;
         initialized = 1;
     }
 
     lw_setcur(0);
     screen_fill(TUI_BLUE);
+    asm volatile("sti" : : : "memory");
+    lw_getk();
 
     putxy("IRQ KEYBOARD READY",0,0);
-    asm volatile("sti" : : : "memory");
     
     return RM_OK;
 }

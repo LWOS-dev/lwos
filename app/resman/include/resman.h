@@ -37,5 +37,9 @@ int resman_image_run(PRM_IMAGE image, PCLW_ENV env, int *exit_code);
 int resman_image_unload(PRM_IMAGE image);
 
 void resman_alarm(void);
+void resman_pcspk(int hz);
+void resman_pcspk_shut(void);
+
+void* resman_task_table(void);
 
 #endif

@@ -208,12 +208,25 @@ clean:
 TUI_HEX_TEST = $(BUILD_DIR)/tests/tui_hex_test
 $(TUI_HEX_TEST): tests/tui_hex_test.c app/monitor/src/tui.c $(wildcard lib/include/*.h) \
     app/monitor/include/tui.h app/monitor/include/keys.h \
-    lib/src/fs.c lib/src/mem.c lib/src/string.c lib/src/convert.c
+    lib/src/fs.c lib/src/mem.c lib/src/string.c lib/src/convert.c lib/src/bitmap.c
 	@mkdir -p $(@D)
 	gcc -std=gnu11 -fno-builtin -ffunction-sections -fdata-sections \
 	    -Wl,--gc-sections -Ilib/include tests/tui_hex_test.c \
-	    lib/src/fs.c lib/src/mem.c lib/src/string.c lib/src/convert.c -o $@
+	    lib/src/fs.c lib/src/mem.c lib/src/string.c lib/src/convert.c lib/src/bitmap.c -o $@
 
 test-tui-hex: $(TUI_HEX_TEST)
 	$(TUI_HEX_TEST)
 .PHONY: test-tui-hex
+
+TUI_EXECUTE_TEST = $(BUILD_DIR)/tests/tui_execute_test
+$(TUI_EXECUTE_TEST): tests/tui_execute_test.c tests/tui_hex_test.c app/monitor/src/tui.c \
+    $(wildcard lib/include/*.h) app/monitor/include/tui.h app/monitor/include/keys.h \
+    lib/src/fs.c lib/src/mem.c lib/src/string.c lib/src/convert.c lib/src/bitmap.c
+	@mkdir -p $(@D)
+	gcc -std=gnu11 -fno-builtin -ffunction-sections -fdata-sections \
+	    -Wl,--gc-sections -Ilib/include tests/tui_execute_test.c \
+	    lib/src/fs.c lib/src/mem.c lib/src/string.c lib/src/convert.c lib/src/bitmap.c -o $@
+
+test-tui-execute: $(TUI_EXECUTE_TEST)
+	$(TUI_EXECUTE_TEST)
+.PHONY: test-tui-execute

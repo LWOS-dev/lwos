@@ -54,11 +54,6 @@ int main(void)
     const BYTE task_bytes[] = {0, 0, 0x28, 0, 0, 0x85, 0, 0};
     expect_bytes(&gate, task_bytes, sizeof(gate));
 
-    SEG_DESC table[SEG_MAX] = {0};
-    sys_gdt = table;
-    assert(find_free_gdt() == 5);
-    for (int i = 5; i < SEG_MAX; i++) table[i].access = GDT_ACC_TSS32_AVAIL;
-    assert(find_free_gdt() == -1);
-    puts("PASS: GDT/IDT hardware bytes, decode, TSS attributes, free slots");
+    puts("PASS: GDT/IDT hardware bytes, decode, TSS attributes");
     return 0;
 }

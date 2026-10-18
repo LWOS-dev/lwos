@@ -7,6 +7,7 @@
 #include "convert.h"
 #include "mem.h"
 #include "lwp.h"
+#include "task.h"
 #include "resman.h"
 
 PWORD video;
@@ -41,6 +42,7 @@ TUI_AREA area_file_expl;
 TUI_AREA area_pci_list;
 TUI_AREA area_pci_info;
 TUI_AREA area_mem_pool;
+TUI_AREA area_task;
 
 static int menu_items=7;
 static int menu_index=0;
@@ -64,6 +66,7 @@ const char name_area_fe[]="FILE EXPLORER";
 const char name_area_pl[]="PCI LIST";
 const char name_area_pi[]="PCI INFO";
 const char name_area_mp[]="MEMORY POOL";
+const char name_area_ts[]="TASQUE MANAGRE";
 
 void draw_area(PTUI_AREA p) {
     set_attr((focus==p->index)?(TUI_YELLOW|TUI_LIGHT):(TUI_WHITE),TUI_BLUE);
@@ -393,11 +396,85 @@ static void showmessage(const char* ctx) {
     lw_getk();
     memcpy(video,subvideo,80*25*sizeof(WORD));
 }
-PBYTE exe_file_buf;
-DWORD exe_length;
-DWORD exe_read_cnt;
-FS_FILE exe_file;
-PRM_IMAGE exe_image=0;
+/* Single foreground call: every path closes the file and releases owned memory. */
+static WORD exe_screen[80*25];
+static void fe_execute(const char *path) {
+    FS_FILE file={0};
+    PBYTE buffer=0;
+    PRM_IMAGE image=0;
+    DWORD length=0, read_count=0;
+    int err=0, exit_code=0;
+    const char *stage="OPEN";
+    char message[64];
+
+    if (!rm_base || !rm_base[LW_RM_SLOT_IMAGE_LOAD] ||
+        !rm_base[LW_RM_SLOT_IMAGE_RUN] || !rm_base[LW_RM_SLOT_IMAGE_UNLOAD]) {
+        showmessage("RESMAN EXECUTION UNAVAILABLE");
+        return;
+    }
+    err=fs_file_open(&monitor_fs,path,&file);
+    if (err)goto cleanup;
+    stage="SIZE";
+    err=fs_file_size(&file,&length);
+    if (err)goto cleanup;
+    /* kmalloc accepts int and rounds up by 4095 bytes. */
+    if (length<sizeof(LwpHdr) || length>0x7ffff000u) {
+        err=FS_ERR_RANGE;
+        goto cleanup;
+    }
+    stage="ALLOC";
+    buffer=kmalloc((int)length);
+    if (!buffer || buffer==(PVOID)-1 || buffer==(PVOID)-2) {
+        buffer=0;
+        err=RM_ERR_MEMORY;
+        goto cleanup;
+    }
+    stage="READ";
+    err=fs_file_read(&file,buffer,length,&read_count);
+    if (!err && read_count!=length)err=FS_ERR_IO;
+    if (err)goto cleanup;
+    fs_file_close(&file);
+
+    stage="LOAD";
+    err=rm_image_load(buffer,length,RM_OWNER_SYSTEM,&image);
+    if (err)goto cleanup;
+    kfree(buffer);
+    buffer=0; /* RESMAN owns a separate copy of the executable. */
+
+    stage="RUN";
+    BYTE saved_attr=vi_attr;
+    memcpy(exe_screen,video,sizeof(exe_screen));
+    err=rm_image_run(image,0,&exit_code);
+    /* Apps can use the BIOS trampoline directly, bypassing gfx_is_live. */
+    lw_gfx_exit();
+    lw_setcur(0);
+    memcpy(video,exe_screen,sizeof(exe_screen));
+    vi_attr=saved_attr;
+
+cleanup:
+    fs_file_close(&file);
+    if (buffer)kfree(buffer);
+    if (image) {
+        int unload_error=rm_image_unload(image);
+        if (unload_error) {
+            strcpy(message,"ERR UNLOAD ");
+            hex_xlat((DWORD)unload_error,message+11,8);
+            showmessage(message);
+            if (!err)return;
+        }
+    }
+    if (err) {
+        strcpy(message,"ERR ");
+        strcpy(message+4,stage);
+        int end=strlen(message);
+        message[end++]=' ';
+        hex_xlat((DWORD)err,message+end,8);
+    } else {
+        strcpy(message,"EXIT WITH ");
+        hex_xlat((DWORD)exit_code,message+10,8);
+    }
+    showmessage(message);
+}
 static void proc_fe(PTUI_AREA a, DWORD ctrl) {
     char text[100];
     char path[256];
@@ -406,80 +483,13 @@ static void proc_fe(PTUI_AREA a, DWORD ctrl) {
         putxy("F5=REFRESH  F2/ENTER=ENTER DIR  F6=HEX EDITOR  UP/DOWN=SELECT",0,23);
         putxy("F4=EXECUTE",0,24);
         switch (ctrl) {
-            case VK_F4: {
-                DWORD exit_code=0;
-                if (fe_index>=filelist_length)break;
-                if (filelist_ptr[fe_index].attr&0x10)break;
-                memzero(path,256);
-                if (fe_entry_path(&filelist_ptr[fe_index],path))break;
-                showmessage(path);
-                exe_read_cnt=0;
-                exe_length=0;
-                memzero(&exe_file,sizeof(FS_FILE));
-                int err;
-                err=fs_file_open(&monitor_fs,path,&exe_file);
-                if (err) {
-                    memcpy(text,"ERR FILE OPEN",13);
-                    hex_xlat(err,text+13,8);
-                    showmessage(text);
-                    break;
-                }
-                err=fs_file_size(&exe_file,&exe_length);
-                if (err) {
-                    memcpy(text,"ERR FILE SIZE",13);
-                    hex_xlat(err,text+13,8);
-                    showmessage(text);
-                    break;
-                }
-                if (exe_length<sizeof(LwpHdr)) {
-                    showmessage("INVALID EXE FILE");
-                    break;
-                }
-                exe_file_buf=kmalloc(exe_length);
-                if (!exe_file_buf || 
-                    exe_file_buf==(PVOID)-1 || 
-                    exe_file_buf==(PVOID)-2) {
-                    exe_file_buf=0;
-                    showmessage("MEMORY FAULT");
-                    break;
-                }
-                memcpy(text,"ALLOCATED AT ",14);
-                hex_xlat((DWORD)exe_file_buf,text+13,8);
-                showmessage(text);
-                err=fs_file_read(&exe_file,exe_file_buf,exe_length,&exe_read_cnt);
-                if (!err&&exe_read_cnt!=exe_length) {
-                    showmessage("INFO MISMATCH");
-                }
-                fs_file_close(&exe_file);
-                err=rm_image_load(exe_file_buf,exe_length,RM_OWNER_SYSTEM,&exe_image);
-                if (err) {
-                    memcpy(text,"ERR LOAD",9);
-                    hex_xlat(err,text+8,8);
-                    showmessage(text);
-                    kfree(exe_file_buf);
-                    break;
-                }
-                err=rm_image_run(exe_image,0,&exit_code);
-                if (err) {
-                    memcpy(text,"ERR RUN ",9);
-                    hex_xlat(err,text+8,8);
-                    showmessage(text);
-                    kfree(exe_file_buf);
-                    break;
-                }
-                memcpy(text,"EXIT WITH ",10);
-                hex_xlat(exit_code,text+10,8);
-                showmessage(text);
-                err=rm_image_unload(exe_image);
-                if (err) {
-                    memcpy(text,"ERR UNLOAD ",11);
-                    hex_xlat(err,text+11,8);
-                    showmessage(text);
-                    kfree(exe_file_buf);
-                    break;
+            case VK_F4:
+                if (fe_index<filelist_length && !(filelist_ptr[fe_index].attr&0x10)) {
+                    int err=fe_entry_path(&filelist_ptr[fe_index],path);
+                    if (err)fe_error=err;
+                    else fe_execute(path);
                 }
                 break;
-            }
             case VK_F5: proc_fe_update_list(); break;
             case VK_UP: if (fe_index)fe_index--; break;
             case VK_DOWN: if (fe_index+1<filelist_length)fe_index++; break;
@@ -1092,7 +1102,7 @@ static void proc_pl_scan() {
     }
 }
 static void proc_pl_detect(DWORD index) {
-
+    ;
 }
 static void proc_pi(PTUI_AREA a, DWORD index) {
     set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE);
@@ -1164,6 +1174,38 @@ static void proc_pl(PTUI_AREA a, DWORD ctrl) {
 static void proc_mp(PTUI_AREA a, DWORD ctrl) { // 统计内存使用情况
     ;
 }
+const char* task_state_name(DWORD s) {
+    switch (s) {
+        case TASK_FREE:     return "FREE    ";
+        case TASK_CREATING: return "CREATING";
+        case TASK_READY:    return "READY   ";
+        case TASK_RUNNING:  return "RUNNING ";
+        case TASK_WAITING:  return "WAITING ";
+        case TASK_DEAD:     return "DEAD    ";
+    }
+    return "UNKNOWN ";
+}
+static void proc_ts(PTUI_AREA a, DWORD ctrl) {
+    if (!rm_base || !rm_base[LW_RM_SLOT_TASK_TABLE]) return;
+    const TASK *task = (const TASK *)rm_base[LW_RM_SLOT_TASK_TABLE];
+    char text[256];
+    DWORD count=0;
+    set_attr(TUI_WHITE,TUI_BLUE);
+    //     01234567890123456789012345678901234567890123
+    putxy("ID       STATE    NAME",a->x+1,a->y+1);
+    set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE);
+    for (int i=0; i<TASK_MAX; i++) {
+        if (task[i].state!=TASK_FREE) {
+            for (int p=0;p<256;p++)text[p]=' ';
+            hex_xlat(task[i].id,text,8);
+            text[8]=' ';
+            memcpy(text+9,task_state_name(task[i].state),8);
+            memcpy(text+18,task[i].name,strlen(task[i].name));
+            text[33]=0;
+            putxy(text,a->x+1,a->y+2+count);
+        }
+    }
+}
 void tui_init() {
     video=(PVOID)0xb8000;
     subvideo=(PWORD)kmalloc(80*25*sizeof(WORD));
@@ -1173,7 +1215,6 @@ void tui_init() {
         lw_getk();
     }
     focus=0;
-    exe_file_buf=0;
     ptr_devs=0;
     for (int i=0; i<80*25; i++)video[i]=0x1020;
 
@@ -1228,6 +1269,13 @@ void tui_init() {
 
     proc_pl_scan();
 
+    area_task.x=6;
+    area_task.y=1;
+    area_task.w=72;
+    area_task.h=20;
+    area_task.name=name_area_ts;
+    area_task.index=-1;
+
     fe_current_cluster=monitor_fs.root_cluster;
     strcpy(fe_path, "/");
     fe_index=0;
@@ -1275,6 +1323,10 @@ void tui_procs(DWORD t) {
             proc_mp(&area_mem_pool,t);
             break;
         }
+        case 4: {
+            proc_ts(&area_task,t);
+            break;
+        }
     }
 }
 void tui_draws() {
@@ -1295,6 +1347,9 @@ void tui_draws() {
         case 3: {
             draw_area(&area_mem_pool);
             break;
+        }
+        case 4: {
+            draw_area(&area_task);
         }
     }
 }

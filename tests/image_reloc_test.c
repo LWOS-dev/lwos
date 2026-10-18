@@ -5,12 +5,15 @@
 #include "mem.h"
 
 static BYTE storage[4][128];
-static unsigned allocations;
+static unsigned allocations, frees;
+static int fail_at=-1;
+static PVOID failure_value;
 PVOID kmalloc(int size) {
+    if ((int)allocations==fail_at)return failure_value;
     assert(size <= 128 && allocations < 4);
     return storage[allocations++];
 }
-void kfree(PVOID p) { (void)p; }
+void kfree(PVOID p) { assert(p); frees++; }
 PVOID memcpy(PVOID dst, PCVOID src, int count) {
     for (int i=0; i<count; i++) ((PBYTE)dst)[i]=((PCBYTE)src)[i];
     return dst;
@@ -66,6 +69,24 @@ int main(void) {
     assert(resman_image_load(&file,81,0,&first)==RM_OK);
     assert(read32((PBYTE)first->base+1)==12);
     assert(resman_image_unload(first)==RM_OK);
+    for (int n=0;n<3;n++) {
+        failure_value=n==0 ? 0 : (n==1 ? (PVOID)-1 : (PVOID)-2);
+        for (fail_at=0;fail_at<2;fail_at++) {
+            allocations=frees=0;
+            assert(resman_image_load(&file,81,0,&first)==RM_ERR_MEMORY && !first);
+            assert(frees==(unsigned)fail_at);
+        }
+    }
+    fail_at=-1;
+    for (int n=0;n<40;n++) {
+        allocations=frees=0;
+        assert(resman_image_load(&file,81,0,&first)==RM_OK);
+        assert(resman_image_unload(first)==RM_OK && frees==2);
+    }
+    file.hdr.stack_size=0;
+    assert(resman_image_load(&file,81,0,&first)==RM_ERR_ARGUMENT && !first);
+    file.hdr.stack_size=0xffffffffu;
+    assert(resman_image_load(&file,81,0,&first)==RM_ERR_ARGUMENT && !first);
     puts("PASS: relocation at two bases, unaligned/unsorted entries, BSS, invalid tables, empty table");
     return 0;
 }

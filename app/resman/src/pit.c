@@ -29,10 +29,6 @@ int pit_set_frequency(BYTE channel, DWORD hz) {
     return 0;
 }
 
-// 初始化定时器 IRQ0
-int resman_pit_init(void) {
-    ;
-}
 void pcspk_enable(void) {
     BYTE v=lw_inb(0x61);
     lw_outb(0x61,v|0x03);
@@ -47,9 +43,50 @@ int pcspk_play(DWORD hz) {
     return 0;
 }
 
+#define PIT_TICK_HZ 100u
+
+void timer_irq(PISR_FRAME frame) {
+    (void)frame;
+    
+    lw_outb(0x20,0x20);
+}
+static DWORD lock(void) {
+    DWORD flags;
+    asm volatile("pushfl; popl %0; cli" : "=r"(flags) : : "memory");
+    return flags;
+}
+
+static void unlock(DWORD flags) {
+    asm volatile("pushl %0; popfl" : : "r"(flags) : "memory", "cc");
+}
+
+// 初始化定时器 IRQ0
+int resman_pit_init(void) {
+    DWORD flags=lock();
+    /* 16 位分频器不能直接产生 1 Hz，使用软件计数分频。 */
+    if (pit_set_frequency(PIT_CH0,PIT_TICK_HZ)!=0) {
+        unlock(flags);
+        return -1;
+    }
+    if (resman_isr_set_handler(0x20,timer_irq)) {
+        unlock(flags);
+        return -1;
+    }
+    pic_irq_set(0,1);
+    unlock(flags);
+    return 0;
+}
+
 void resman_alarm() {
     pcspk_disable();
     pcspk_play(440);
     lw_getk();
+    pcspk_disable();
+}
+
+void resman_pcspk(int hz) {
+    pcspk_play(hz);
+}
+void resman_pcspk_shut() {
     pcspk_disable();
 }

@@ -34,7 +34,10 @@ int resman_image_load(PCVOID file, DWORD file_size, WORD owner, PRM_IMAGE *out) 
     if (plhdr->magic != LWP_MAGIC)return -2;
     if (plhdr->version != LWP_VERSION)return -3;
     if (plhdr->hdr_size != LWP_HEADER_SIZE)return -4;
-    //if (plhdr->abi_need > LW_SLOT_COUNT)return -6;
+    if (plhdr->abi_need > LW_SLOT_COUNT)return RM_ERR_ABI;
+    if (!plhdr->mem_size || plhdr->mem_size>0x7ffff000u ||
+        plhdr->stack_size<32 || plhdr->stack_size>0x7ffff000u)
+        return RM_ERR_ARGUMENT;
     if (plhdr->image_size > plhdr->mem_size)return -7;
     if (plhdr->entry >= plhdr->image_size)return -8;
 
@@ -63,11 +66,15 @@ int resman_image_load(PCVOID file, DWORD file_size, WORD owner, PRM_IMAGE *out) 
     if (!pimg)return -11;
 
     base=kmalloc(plhdr->mem_size);
+    if (!base || base==(PVOID)-1 || base==(PVOID)-2) {
+        memzero(pimg,sizeof(*pimg));
+        return RM_ERR_MEMORY;
+    }
     stack=kmalloc(plhdr->stack_size);
-    if (base==(PVOID)-1 || base==(PVOID)-2 ||
-        stack==(PVOID)-1 || stack==(PVOID)-2) {
-        memzero(pimg,sizeof(RM_IMAGE));
-        return -12;
+    if (!stack || stack==(PVOID)-1 || stack==(PVOID)-2) {
+        kfree(base);
+        memzero(pimg,sizeof(*pimg));
+        return RM_ERR_MEMORY;
     }
     memcpy(base,(PCBYTE)file+plhdr->image_off,plhdr->image_size);
     memzero((PBYTE)base+plhdr->image_size,plhdr->mem_size-plhdr->image_size);

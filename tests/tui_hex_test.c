@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include "../app/monitor/src/tui.c"
 FS_VOLUME monitor_fs;
+PVOID *lw_abi_base, *rm_base;
 static BYTE disk[256][512];
 static int fail_read, fail_write, fail_flush, writes;
 static WORD screen[80*25];

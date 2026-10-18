@@ -36,15 +36,12 @@ typedef struct _SEG_DESC {
 
 _Static_assert(sizeof(SEG_DESC) == 8, "GDT descriptor hardware format");
 
-extern PSEG_DESC sys_gdt;
-
 typedef struct _GDTR {
     WORD limit;
     DWORD base;
 } __attribute__((packed)) GDTR, *PGDTR;
 
 _Static_assert(sizeof(GDTR) == 6, "GDTR hardware format");
-extern GDTR sys_gdtr;
 typedef struct _SMP_SEG {
     DWORD base;
     DWORD limit;
@@ -93,14 +90,8 @@ typedef struct _IDTR {
 
 _Static_assert(sizeof(IDTR) == 6, "IDTR hardware format");
 
-extern PINT_DESC sys_idt;
-extern IDTR sys_idtr;
-
 void int_xlat_read(PINT_DESC src, PSMP_INT dest);
 void int_xlat_write(PINT_DESC dest, PSMP_INT src);
-void idt_update(void);
-/* entries 包含 INT_MAX 个入口；保留 monitor 的 #DB/#BP 和向量 8。 */
-void idt_init(PCDWORD entries);
 
 typedef struct _TSS32 {
     DWORD backlink;     // +0h
@@ -152,17 +143,11 @@ typedef struct _TASK {
     TSS32 tss;          // +3ch
 } TASK, *PTASK;
 
-void gdt_init(void);
-void gdt_update(void);
-int find_free_gdt(void);
-
 void seg_xlat(PSMP_SEG dest, PSEG_DESC src);
 void seg_xlat_in(PSMP_SEG src, PSEG_DESC dest);
 /* 普通 32 位分页粒度段的便捷写入；TSS/16 位段用 seg_xlat_in 指定 attr。 */
 void seg_write(PSEG_DESC dest, DWORD base, DWORD limit, BYTE flags);
 
-void double_fault_init(void);
-void task_register_load(void);
-int bootstrap_tss_init(void);
+#define TASK_MAX 64
 
 #endif

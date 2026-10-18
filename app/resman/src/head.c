@@ -1,4 +1,5 @@
 #include "../include/resman.h"
+#include "../include/task.h"
 
 extern char __bss_start[], __bss_end[];
 
@@ -17,4 +18,8 @@ const PVOID lw_rm[LW_RM_SLOT_COUNT]
     [LW_RM_SLOT_IMAGE_RUN] = (PVOID)resman_image_run,
     [LW_RM_SLOT_IMAGE_UNLOAD] = (PVOID)resman_image_unload,
     [LW_RM_SLOT_ALARM] = (PVOID)resman_alarm,
+    [LW_RM_SLOT_ALARM_FREQ] = (PVOID)resman_pcspk,
+    [LW_RM_SLOT_ALARM_SHUT] = (PVOID)resman_pcspk_shut,
+    [LW_RM_SLOT_TASK_TABLE] = (PVOID)task,
+    [LW_RM_SLOT_TASK_CURRENT] = (PVOID)&current_task,
 };
