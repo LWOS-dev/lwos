@@ -78,6 +78,8 @@ enum {
     LW_SLOT_PCI_PRESENT         = 0x40,
     LW_SLOT_PCI_READ_DWORD      = 0x41,
     LW_SLOT_PCI_WRITE_DWORD     = 0x42,
+    LW_SLOT_PCI_READ_WORD       = 0x43,
+    LW_SLOT_PCI_WRITE_WORD      = 0x44,
 
     LW_SLOT_DISK_PROBE          = 0x60,
     LW_SLOT_DISK_COUNT          = 0x61,
@@ -158,6 +160,8 @@ extern PVOID *lw_abi_base;
 #define lw_pci_present  LW_CALL(LW_SLOT_PCI_PRESENT,        int (*)(void))
 #define lw_pci_read     LW_CALL(LW_SLOT_PCI_READ_DWORD,     DWORD (*)(BYTE, BYTE, BYTE, BYTE))
 #define lw_pci_write    LW_CALL(LW_SLOT_PCI_WRITE_DWORD,    void (*)(BYTE, BYTE, BYTE, BYTE, DWORD))
+#define lw_pci_read_w   LW_CALL(LW_SLOT_PCI_READ_WORD,      WORD (*)(BYTE, BYTE, BYTE, BYTE))
+#define lw_pci_write_w  LW_CALL(LW_SLOT_PCI_WRITE_WORD,     void (*)(BYTE, BYTE, BYTE, BYTE, WORD))
 
 #define lw_resv_entry   LW_CALL(LW_SLOT_RESV_ENTRY,         void (*)(void))
 // check LWAB

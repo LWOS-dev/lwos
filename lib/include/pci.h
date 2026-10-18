@@ -31,6 +31,7 @@ WORD pci_read_word(BYTE bus, BYTE dev, BYTE func, BYTE off);
 BYTE pci_read_byte(BYTE bus, BYTE dev, BYTE func, BYTE off);
 
 void pci_write_dword(BYTE bus, BYTE dev, BYTE func, BYTE off, DWORD value);
+void pci_write_word(BYTE bus, BYTE dev, BYTE func, BYTE off, WORD value);
 
 int pci_present(void);
 

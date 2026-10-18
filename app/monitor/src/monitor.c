@@ -180,64 +180,6 @@ static void execute(const char* str) {
             }
             break;
         }
-        case 'a': {
-            switch (c1) {
-                case 'p': {
-                    lw_puts("DISK PROBE\n\r");
-                    lw_disk_probe();
-                    return;
-                }
-                case 'r': {
-                    if (!hex_parse(&str,&a)||
-                    !hex_parse(&str,&b)||
-                    !hex_parse(&str,&c)||
-                    !hex_parse(&str,&d)) {
-                        lw_puts("SYNTAX ERROR\n\r");
-                        return;
-                    }
-                    lw_disk_read(a,b,d,(PVOID)c);
-                    lw_puts("READ  ");
-                    lw_put_dword(d);
-                    lw_puts(" SECTOR(S) FROM LBA ");
-                    lw_put_dword(b);
-                    lw_puts(" TO [");
-                    lw_put_dword(c);
-                    lw_puts("] AT DEV ");
-                    lw_put_byte(a);
-                    lw_puts("\n\r");
-                    break;
-                }
-                case 'w': {
-                    if (!hex_parse(&str,&a)||
-                    !hex_parse(&str,&b)||
-                    !hex_parse(&str,&c)||
-                    !hex_parse(&str,&d)) {
-                        lw_puts("SYNTAX ERROR\n\r");
-                        return;
-                    }
-                    lw_disk_write(a,b,d,(PVOID)c);
-                    lw_puts("WRITE ");
-                    lw_put_dword(d);
-                    lw_puts(" SECTOR(S) TO LBA ");
-                    lw_put_dword(b);
-                    lw_puts(" FROM [");
-                    lw_put_dword(c);
-                    lw_puts("] AT DEV ");
-                    lw_put_byte(a);
-                    lw_puts("\n\r");
-                    break;
-                }
-                case 0: {
-                    lw_puts("USAGE: ar/w [DEV] [LBA] [TARGET] [COUNT]\n\r");
-                    break;
-                }
-            }
-            break;
-        }
-        case 'h': {
-            help();
-            break;
-        }
         case 'n': {
             BYTE tb,td,tf;
             DWORD bar0;
@@ -262,52 +204,6 @@ static void execute(const char* str) {
                 default: {
                     break;
                 }
-            }
-            break;
-        }
-        case 'p': {
-            DWORD bus, dev, fn;
-            if (!hex_parse(&str,&bus)) {
-                pci_scan();
-                return;
-            }
-            if (!hex_parse(&str,&dev) || !hex_parse(&str, &fn)) {
-                pci_scan();
-                return;
-            }
-            if (bus > 0xFF || dev > 31 || fn > 7) {
-                lw_puts("INVALID BDF\n\r");
-                return;
-            }
-            pci_detail((BYTE)bus,(BYTE)dev,(BYTE)fn);
-            break;
-        }
-        case 'v': {
-            int rc;
-            if (c1==0) {
-                lw_puts("GFX ");
-                lw_puts(lw_gfx_is_live()?"LIVE":"OFF ");
-                lw_puts("\n\r");
-                lw_puts("FRAMEBUF=");
-                lw_put_dword((DWORD)lw_get_fb());
-                lw_puts(" ");
-                lw_put_word((DWORD)lw_get_fb_w());
-                lw_puts("x");
-                lw_put_word((DWORD)lw_get_fb_h());
-                lw_puts(" ");
-                lw_put_byte((DWORD)lw_get_fb_bpp());
-                lw_puts("BIT PITCH=");
-                lw_put_dword((DWORD)lw_get_fb_pitch()/4);
-                lw_puts("*DWORD\n\r");
-            } else if (c1=='e') {
-                rc=lw_gfx_enter();
-                if (rc) {
-                    lw_puts(rc==-1?"NO USABLE MODE IN BOOT INFO\n\r":
-                            "ROM REFUSED THE MODE\n\r");
-                    return;
-                }
-            } else if (c1=='x') {
-                lw_gfx_exit();
             }
             break;
         }

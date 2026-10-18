@@ -27,6 +27,10 @@ void pci_write_dword(BYTE bus, BYTE dev, BYTE func, BYTE off, DWORD value) {
     outl(PCI_CFG_ADDR, cfg_addr(bus, dev, func, off));
     outl(PCI_CFG_DATA, value);
 }
+void pci_write_word(BYTE bus, BYTE dev, BYTE func, BYTE off, WORD value) {
+    outl(PCI_CFG_ADDR, cfg_addr(bus, dev, func, off));
+    outw(PCI_CFG_DATA + (off&2), value);
+}
 
 int pci_present(void) {
     DWORD saved, probe;

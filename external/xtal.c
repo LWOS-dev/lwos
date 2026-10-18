@@ -1,4 +1,5 @@
-/* CPU port of 04.crystal cluster.glsl, scene2: 72 dispersive crystals.
+/* 本 C 转换文件由 AI 生成。
+ * CPU port of 04.crystal cluster.glsl, scene2: 72 dispersive crystals.
  * All arithmetic is float. sin/cos, sqrt and the shader's powers use LUTs.
  * Geometry/planes are built once, rather than once per ray as in GLSL.
  */

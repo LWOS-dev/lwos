@@ -39,8 +39,10 @@ TUI_AREA area_mem_dump;
 TUI_AREA area_file_info;
 TUI_AREA area_file_expl;
 TUI_AREA area_pci_list;
+TUI_AREA area_pci_info;
+TUI_AREA area_mem_pool;
 
-static int menu_items=4;
+static int menu_items=7;
 static int menu_index=0;
 static int tuim_page=0;
 
@@ -49,7 +51,10 @@ const char name_menu[][7]={
     "RESET",
     "HALT",
     "RCS",
-    "PCIDEV"
+    "PCIDEV",
+    "IRQS",
+    "MEM",
+    "TASKS"
 };
 const char name_units[4][6]={" BYTE"," WORD","DWORD","QWORD"};
 const char name_area_mr[]="MEM READER";
@@ -57,6 +62,8 @@ const char name_area_md[]="MEM DUMP";
 const char name_area_fi[]="FILE INFO";
 const char name_area_fe[]="FILE EXPLORER";
 const char name_area_pl[]="PCI LIST";
+const char name_area_pi[]="PCI INFO";
+const char name_area_mp[]="MEMORY POOL";
 
 void draw_area(PTUI_AREA p) {
     set_attr((focus==p->index)?(TUI_YELLOW|TUI_LIGHT):(TUI_WHITE),TUI_BLUE);
@@ -113,6 +120,7 @@ void proc_menu(DWORD ctrl) {
         case 0xa: {
             if (menu_index<2)break;
             tuim_page=menu_index-2;
+            for (int i=0; i<80*25; i++)video[i]=0x1020;
             break;
         }
         default: {
@@ -856,16 +864,27 @@ static void proc_mr(PTUI_AREA a, DWORD ctrl) {
         putxyn(type_buf,a->x+16,a->y+1+mat,type_ptr);
     }
 }
+enum {
+    BAR_SIZE_UNKNOWN,
+    BAR_SIZE_VALID,
+    BAR_SIZE_FAILED
+};
+enum {
+    BAR_IO,
+    BAR_MEM32,
+    BAR_MEM64
+};
 typedef struct _PCI_BAR_INFO {
     QWORD base,size;
     DWORD raw_lo,raw_hi;
     BYTE slot,slots,kind,prefetchable;
-    BYTE size_valid,state;
+    BYTE size_state;
+    int probe_error;
 } PCI_BAR_INFO, *PPCI_BAR_INFO;
 typedef struct _PCI_DEV_INFO {
     BYTE bus,dev,func;
     BYTE hdr_type;
-    WORD vender,device;
+    WORD vendor,device;
     BYTE class_code,subclass,prog_if,revision;
     WORD command,status; // capture
     BYTE irq_line,irq_pin;
@@ -876,21 +895,271 @@ typedef struct _PCI_DEV_INFO {
     BYTE cap_ptr;
 } PCI_DEV_INFO, *PPCI_DEV_INFO;
 PPCI_DEV_INFO ptr_devs; // 设备信息数组
-static void proc_pl(PTUI_AREA a, DWORD ctrl) {
-    CHAR tstrdw[9];
-    CHAR tstrqw[17];
-
-    if (focus!=a->index)goto draw;
-
-    set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE);
-    putxy("UP/DOWN=DEVICES",0,23);
-    draw:
-    // 第一次扫描只记录长度
+DWORD found_devs;
+const char *pci_class_names(BYTE cls, BYTE sub) {
+	switch (cls) {
+	case 0x00: return "UNCLASSFIED\0";
+	case 0x01:
+		switch (sub) {
+		case 0x01: return "STORAGE IDE\0";
+		case 0x06: return "STORAGE SATA/AHCI\0";
+		case 0x08: return "STORAGE NVME\0";
+		}
+		return "STORAGE\0";
+	case 0x02:
+		return sub == 0x00 ? "NET ETH\0" :
+		       sub == 0x80 ? "NET OTH\0" : "NET\0";
+	case 0x03:
+		return sub == 0x00 ? "GFX VGA\0" : "GFX\0";
+	case 0x04:
+		switch (sub) {
+		case 0x00: return "AUDIO AC97\0";
+		case 0x01: return "AUDIO MIDI\0";
+		case 0x03: return "AUDIO HDA\0";
+		}
+		return "MULTIMEDIA\0";
+	case 0x05: return "MEM CTRL\0";
+	case 0x06:
+		switch (sub) {
+		case 0x00: return "BRIDGE HOST\0";
+		case 0x01: return "BRIDGE ISA\0";
+		case 0x04: return "BRIDGE PCI2PCI\0";
+		}
+		return "BRIDGE\0";
+	case 0x07: return "SERIAL/COMM\0";
+	case 0x08: return "SYS EXT\0";
+	case 0x09: return "INPUT\0";
+	case 0x0B: return "CPU\0";
+	case 0x0C:
+		switch (sub) {
+		case 0x03: return "USB\0";
+		case 0x05: return "SMBUS\0";
+		}
+		return "SBUS\0";
+	case 0x0D: return "WIRELESS\0";
+	case 0x11: return "SIGNAL PROC\0";
+	}
+	return "DEVICE\0";
+}
+const char *pci_vendor_names(WORD ven) {
+	switch (ven) {
+	case 0x8086: return "INTEL\0";
+	case 0x1002: return "AMD/ATI\0";
+	case 0x1022: return "AMD\0";
+	case 0x10DE: return "NVIDIA\0";
+	case 0x1234: return "QEMU\0";
+	case 0x1AF4: return "VIRTIO\0";
+	case 0x1B36: return "RED HAT\0";
+	case 0x10EC: return "REALTEK\0";
+	case 0x14E4: return "BROADROM\0";
+	case 0x1969: return "ATHEROS\0";
+	case 0x1106: return "VIA\0";
+	case 0x5333: return "S3\0";
+	case 0x80EE: return "VIRTUALBOX\0";
+	case 0x15AD: return "VMWARE\0";
+	}
+	return 0;
+}
+static void proc_pl_scan() {
+    DWORD scan_ptr;
+    found_devs=0;
     if (ptr_devs) {
         kfree(ptr_devs);
         ptr_devs=0;
     }
-    
+    for (DWORD bus=0;bus<256;bus++) {
+        for (DWORD dev=0;dev<32;dev++) {
+            BYTE nfn=1;
+            for (BYTE fn=0;fn<nfn;fn++) {
+                // VENDOR ID -> +0:0000ffffh
+                WORD ven=lw_pci_read((BYTE)bus,dev,fn,0)&0xffff;
+                BYTE hdr;
+                if (ven==0xffff||ven==0)continue;
+                if (fn==0) {
+                    // HEADER TYPE -> +c:00ff0000h
+                    hdr=(lw_pci_read((BYTE)bus,dev,fn,0xc)>>16)&0xff;
+                    if (hdr&0x80)nfn=8;
+                }
+                found_devs++;
+            }
+        }
+    }
+    if (found_devs==0)return;
+    ptr_devs=kmalloc(found_devs*sizeof(PCI_DEV_INFO));
+    scan_ptr=0;
+    for (DWORD bus=0;bus<256;bus++) {
+        for (DWORD dev=0;dev<32;dev++) {
+            BYTE nfn=1;
+            for (BYTE fn=0;fn<nfn;fn++) {
+                // VENDOR ID -> +0:0000ffffh
+                WORD ven=lw_pci_read((BYTE)bus,dev,fn,0)&0xffff;
+                // DEVICE -> +0:ffff0000h
+                WORD device=(lw_pci_read((BYTE)bus,dev,fn,0)>>16)&0xffff;
+                WORD cmd, stt;
+                WORD subsysven, subsysdev;
+                BYTE cls, sub, hdr, pif, rev;
+                BYTE irql,irqp;
+                if (ven==0xffff||ven==0)continue;
+                if (fn==0) {
+                    // HEADER TYPE -> +c:00ff0000h
+                    hdr=(lw_pci_read((BYTE)bus,dev,fn,0xc)>>16)&0xff;
+                    if (hdr&0x80)nfn=8;
+                }
+                // STATUS -> +4:ffff0000h
+                stt=(lw_pci_read((BYTE)bus,dev,fn,4)>>16)&0xffff;
+                // COMMAND -> +4:0000ffffh
+                cmd=lw_pci_read((BYTE)bus,dev,fn,4)&0xffff;
+                // CLASS -> +8:ff000000h
+                cls=(lw_pci_read((BYTE)bus,dev,fn,8)>>24)&0xff;
+                // SUBCLASS -> +8:00ff0000h
+                sub=(lw_pci_read((BYTE)bus,dev,fn,8)>>16)&0xff;
+                // PROG IF -> +8:0000ff00h
+                pif=(lw_pci_read((BYTE)bus,dev,fn,8)>>8)&0xff;
+                // REVISION -> +8:000000ffh
+                rev=lw_pci_read((BYTE)bus,dev,fn,8)&0xff;
+                // SUBSYS VENDER -> +2c:ffff0000h
+                subsysven=(lw_pci_read((BYTE)bus,dev,fn,0x2c)>>16)&0xffff;
+                // SUBSYS DEVICE -> +2c:0000ffffh
+                subsysdev=lw_pci_read((BYTE)bus,dev,fn,0x2c)&0xffff;
+                // IRQPIN -> +3c:0000ff00h
+                irqp=(lw_pci_read((BYTE)bus,dev,fn,0x3c)>>8)&0xff;
+                // IRQLINE -> +3c:000000ffh
+                irql=(lw_pci_read((BYTE)bus,dev,fn,0x3c)&0xff);
+                ptr_devs[scan_ptr].bus=bus;
+                ptr_devs[scan_ptr].dev=dev;
+                ptr_devs[scan_ptr].func=fn;
+                ptr_devs[scan_ptr].hdr_type=hdr;
+                ptr_devs[scan_ptr].vendor=ven;
+                ptr_devs[scan_ptr].device=device;
+                ptr_devs[scan_ptr].class_code=cls;
+                ptr_devs[scan_ptr].subclass=sub;
+                ptr_devs[scan_ptr].prog_if=pif;
+                ptr_devs[scan_ptr].revision=rev;
+                ptr_devs[scan_ptr].status=stt;
+                ptr_devs[scan_ptr].command=cmd;
+                ptr_devs[scan_ptr].irq_line=irql;
+                ptr_devs[scan_ptr].irq_pin=irqp;
+                ptr_devs[scan_ptr].subsys_vendor=subsysven;
+                ptr_devs[scan_ptr].subsys_device=subsysdev;
+                ptr_devs[scan_ptr].bar_count=0;
+                for (int i=0; i<6; i++) {
+                    BYTE bar_slots;
+                    switch (hdr&3) {
+                        case 0:bar_slots=6;break;
+                        case 1:bar_slots=2;break;
+                        case 2:bar_slots=0;break;
+                        default: {
+                            // ...
+                            break;
+                        }
+                    }
+                    BYTE off=(BYTE)(0x10+i*4);
+                    DWORD v=lw_pci_read(bus,dev,fn,off);
+                    ptr_devs[scan_ptr].bars[i].slot=i;
+                    ptr_devs[scan_ptr].bars[i].slots=1;
+                    ptr_devs[scan_ptr].bars[i].size=0;
+                    ptr_devs[scan_ptr].bars[i].size_state=BAR_SIZE_UNKNOWN;
+                    ptr_devs[scan_ptr].bars[i].probe_error=0;
+
+                    if (v&1) {
+                        ptr_devs[scan_ptr].bars[i].kind=BAR_IO;
+                        ptr_devs[scan_ptr].bars[i].base=v&0xfffffffcu;
+                        ptr_devs[scan_ptr].bars[i].prefetchable=0;
+                    } else {
+                        BYTE type=(v>>1)&3;
+                        ptr_devs[scan_ptr].bars[i].prefetchable=!!(v&8);
+                        if (type==0) {
+                            ptr_devs[scan_ptr].bars[i].kind=BAR_MEM32;
+                            ptr_devs[scan_ptr].bars[i].base=v&0xfffffff0u;
+                        } else if (type==2) {
+                            if (i+1>=bar_slots) {
+                                break;
+                            }
+                            DWORD h=v=lw_pci_read(bus,dev,fn,off+4);
+                            ptr_devs[scan_ptr].bars[i].kind=BAR_MEM64;
+                            ptr_devs[scan_ptr].bars[i].slots=2;
+                            ptr_devs[scan_ptr].bars[i].base=
+                                ((QWORD)h<<32)|(v&0xfffffff0);
+                        } else {
+                            break;
+                        }
+                    }
+                    ptr_devs[scan_ptr].bar_count+=bar_slots;
+                }
+                scan_ptr++;
+            }
+        }
+    }
+}
+static void proc_pl_detect(DWORD index) {
+
+}
+static void proc_pi(PTUI_AREA a, DWORD index) {
+    set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE);
+    putxy("VENDOR",a->x+1,a->y+1);
+    putxy("CLASS",a->x+1,a->y+3);
+    set_attr(TUI_WHITE,TUI_BLUE);
+    putxy(pci_vendor_names(ptr_devs[index].vendor),a->x+1,a->y+2);
+    putxy(pci_class_names(ptr_devs[index].class_code,ptr_devs[index].subclass),
+        a->x+1,a->y+4);
+}
+static void proc_pl(PTUI_AREA a, DWORD ctrl) {
+    CHAR tstrdw[9];
+    CHAR tstrqw[17];
+    CHAR text[256];
+    DWORD scan_ptr;
+    static DWORD index;
+
+    switch (ctrl) {
+        case VK_UP: {
+            index--;
+            if (index<0)index=0;
+            break;
+        }
+        case VK_DOWN: {
+            index++;
+            if (index>found_devs)index=found_devs;
+            break;
+        }
+        case VK_F5: {
+            proc_pl_scan();
+            break;
+        }
+        case VK_F6: {
+            proc_pl_detect(index);
+            break;
+        }
+    }
+    if (focus!=a->index)goto draw;
+    //  012345678901234567
+    // "BB:DD:F VVVV:CCCC"
+    proc_pi(&area_pci_info,index);
+    for (DWORD i=0; i<found_devs; i++) {
+        if (i==index) {
+            if (focus==a->index) {
+                set_attr(TUI_BLACK,TUI_WHITE);
+            } else {
+                set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE);
+            }
+        } else {
+            set_attr(TUI_WHITE,TUI_BLUE);
+        }
+        hex_xlat(ptr_devs[i].bus,text,2);
+        text[2]=':';
+        hex_xlat(ptr_devs[i].dev,text+3,2);
+        text[5]=':';
+        hex_xlat(ptr_devs[i].func,text+6,1);
+        text[7]=' ';
+        hex_xlat(ptr_devs[i].vendor,text+8,4);
+        text[12]=':';
+        hex_xlat(ptr_devs[i].device,text+13,4);
+        text[17]=0;
+        putxy(text,a->x+1,a->y+1+i);
+    }
+    set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE);
+    putxy("UP/DOWN=DEVICES",0,23);
+    putxy("F5=REFRESH      F6=DETECT",0,24);
+    draw:
 }
 void tui_init() {
     video=(PVOID)0xb8000;
@@ -935,10 +1204,26 @@ void tui_init() {
 
     area_pci_list.x=6;
     area_pci_list.y=1;
-    area_pci_list.w=32;
+    area_pci_list.w=18;
     area_pci_list.h=20;
     area_pci_list.name=name_area_pl;
     area_pci_list.index=1;
+
+    area_pci_info.x=25;
+    area_pci_info.y=1;
+    area_pci_info.w=20;
+    area_pci_info.h=10;
+    area_pci_info.name=name_area_pi;
+    area_pci_info.index=-1;
+
+    area_mem_pool.x=6;
+    area_mem_pool.y=1;
+    area_mem_pool.w=72;
+    area_mem_pool.h=20;
+    area_mem_pool.name=name_area_mp;
+    area_mem_pool.index=-1;
+
+    proc_pl_scan();
 
     fe_current_cluster=monitor_fs.root_cluster;
     strcpy(fe_path, "/");
@@ -983,6 +1268,10 @@ void tui_procs(DWORD t) {
             proc_pl(&area_pci_list,t);
             break;
         }
+        case 3: {
+            proc_mp(&area_mem_pool);
+            break;
+        }
     }
 }
 void tui_draws() {
@@ -997,6 +1286,11 @@ void tui_draws() {
         }
         case 1: {
             draw_area(&area_pci_list);
+            draw_area(&area_pci_info);
+            break;
+        }
+        case 2: {
+            draw_area(&area_mem_pool);
             break;
         }
     }
