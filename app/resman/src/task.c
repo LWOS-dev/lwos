@@ -1,5 +1,6 @@
 #include "../include/task.h"
 #include "../include/resman.h"
+#include "../include/keyboard.h"
 
 #include "abi.h"
 
@@ -8,6 +9,7 @@ GDTR sys_gdtr;
 PINT_DESC sys_idt;
 IDTR sys_idtr;
 static TASK_RUNTIME runtime[TASK_MAX];
+static PTASK idle_task;
 
 void gdt_update(void) {
     asm volatile("lgdt %0" : : "m"(sys_gdtr) : "memory");
@@ -122,6 +124,7 @@ void double_fault_init() {
     int_xlat_write(sys_idt+8,&gate);
 }
 
+#define IDLE_TASK_ID (TASK_MAX-1)
 TASK task[TASK_MAX];
 PTASK current_task;
 
@@ -168,6 +171,19 @@ int resman_task_acquire(PTASK *out) {
 }
 
 extern void task_start(void);
+
+static void task_fpu_switch(DWORD old_id, DWORD new_id) {
+    PTASK_RUNTIME old=&runtime[old_id];
+    PTASK_RUNTIME next=&runtime[new_id];
+    asm volatile("clts":::"memory");
+    asm volatile("fnsave %0":"=m"(old->fpu_state)::"memory");
+    old->fpu_valid=1;
+    if (next->fpu_valid) {
+        asm volatile("frstor %0"::"m"(next->fpu_state):"memory");
+    } else {
+        asm volatile("fninit":::"memory");
+    }
+}
 
 int resman_task_create(PRM_IMAGE image, PCLW_ENV env, PDWORD out_id) {
     if (!out_id)return RM_ERR_ARGUMENT;
@@ -261,31 +277,208 @@ done:
     return rc;
 }
 
-/* Called with IRQs disabled. JMP switches TSS without nesting task backlinks.
- * A resumed task returns here, then unwinds its own timer interrupt frame. */
 void task_schedule(void) {
-    if (!current_task)return;
-    PTASK previous=current_task;
-    for (DWORD offset=1; offset<TASK_MAX; offset++) {
-        PTASK next=&task[(previous->id+offset)%TASK_MAX];
-        if (next->state!=TASK_READY)continue;
-        if (previous->state==TASK_RUNNING)previous->state=TASK_READY;
-        next->state=TASK_RUNNING;
-        current_task=next;
-        struct { DWORD offset; WORD selector; } __attribute__((packed)) target={0,next->tss_selector};
-        asm volatile("ljmp *%0" :: "m"(target) : "memory");
+if (!current_task)
         return;
+
+    PTASK previous = current_task;
+    PTASK next = 0;
+
+    for (DWORD offset=1; offset<TASK_MAX; offset++) {
+        PTASK candidate=&task[(previous->id+offset) % TASK_MAX];
+        if (candidate==idle_task)continue;
+        if (candidate->state == TASK_READY) {
+            next = candidate;
+            break;
+        }
     }
+
+    if (!next) {
+        if (previous!=idle_task &&
+            previous->state == TASK_RUNNING)
+            return;
+        if (previous == idle_task)
+            return;
+        next=idle_task;
+    }
+    if (!next)return;
+    if (previous->state==TASK_RUNNING)previous->state=TASK_READY;
+    task_fpu_switch(previous->id, next->id);
+    next->state = TASK_RUNNING;
+    current_task = next;
+    struct {
+        DWORD offset;
+        WORD selector;
+    } __attribute__((packed)) target = {
+        0, next->tss_selector
+    };
+
+    asm volatile("ljmp *%0"
+                 :: "m"(target) : "memory");
+    asm volatile("clts" ::: "memory");
+}
+
+/* All lifecycle transitions run with IRQs masked on this single CPU.
+ * Never free the currently executing stack or a busy TSS. DEAD is retained
+ * until an explicit reap, so callers can inspect exit_code before reuse. */
+static DWORD task_lock(void) {
+    DWORD flags;
+    asm volatile("pushfl; popl %0; cli" : "=r"(flags) :: "memory");
+    return flags;
+}
+
+static void task_unlock(DWORD flags) {
+    asm volatile("pushl %0; popfl" :: "r"(flags) : "memory", "cc");
+}
+
+int resman_task_exit(int exit_code) {
+    DWORD flags=task_lock();
+    if (!current_task || current_task==&task[0]) {
+        task_unlock(flags);
+        return RM_ERR_ARGUMENT;
+    }
+    current_task->exit_code=exit_code;
+    current_task->state=TASK_DEAD;
+    resman_keyboard_task_gone(current_task->id);
+    task_schedule();
+    /* A DEAD task is never selected again; idle remains available. */
+    for (;;)asm volatile("cli; hlt" ::: "memory");
+}
+
+int resman_task_kill(DWORD id) {
+    DWORD flags=task_lock();
+    int rc=RM_ERR_ARGUMENT;
+    if (id==IDLE_TASK_ID)goto done;
+    if (!id || id>=TASK_MAX || &task[id]==current_task)goto done;
+    PTASK tk=&task[id];
+    if (tk->state!=TASK_READY && tk->state!=TASK_WAITING) {
+        rc=RM_ERR_NOT_READY;
+        goto done;
+    }
+    tk->exit_code=RM_TASK_EXIT_KILLED;
+    tk->state=TASK_DEAD;
+    resman_keyboard_task_gone(id);
+    rc=RM_OK;
+done:
+    task_unlock(flags);
+    return rc;
+}
+
+int resman_task_reap(DWORD id, int *exit_code) {
+    if (!exit_code)return RM_ERR_ARGUMENT;
+    DWORD flags=task_lock();
+    int rc=RM_ERR_ARGUMENT;
+    if (!id || id>=TASK_MAX || &task[id]==current_task)goto done;
+    PTASK tk=&task[id];
+    if (tk->state!=TASK_DEAD) {
+        rc=RM_ERR_NOT_READY;
+        goto done;
+    }
+    DWORD index=tk->tss_selector>>3;
+    if (index<5 || index>=SEG_MAX || !sys_gdt ||
+        (sys_gdt[index].access & 0x0f)!=9) {
+        rc=RM_ERR_NOT_READY; /* TSS must be available, never busy. */
+        goto done;
+    }
+    PRM_IMAGE image=runtime[id].image;
+    if (!resman_image_valid(image) || image->state!=RM_IMAGE_BOUND)goto done;
+    image->state=RM_IMAGE_LOADED;
+    rc=resman_image_unload(image);
+    if (rc) {
+        image->state=RM_IMAGE_BOUND;
+        goto done;
+    }
+    resman_alloc_reap(id);
+    *exit_code=tk->exit_code;
+    memzero(sys_gdt+index,sizeof(SEG_DESC));
+    memzero(&runtime[id],sizeof(runtime[id]));
+    memzero(tk,sizeof(*tk));
+done:
+    task_unlock(flags);
+    return rc;
 }
 
 void task_bootstrap(void) {
     PTASK self=current_task;
     PTASK_RUNTIME rt=&runtime[self->id];
     int result=((LWP_ENTRY)self->entry)(&rt->env);
-    asm volatile("cli" ::: "memory");
-    self->exit_code=result;
-    self->state=TASK_DEAD;
-    /* Keep the image/stack bound: this suspended context still owns them. */
+    resman_task_exit(result);
+    for (;;)asm volatile("cli; hlt" ::: "memory");
+}
+
+static BYTE idle_stack[8192] __attribute__((aligned(16)));
+
+__attribute__((noreturn))
+static void task_idle_entry(void) {
+    asm volatile("clts; cld":::"memory","cc");
+    while (1)asm volatile("sti; hlt":::"memory");
+}
+int task_idle_init(void) {
+    int rc=RM_ERR_ARGUMENT;
+    DWORD ef;
+    asm volatile("pushfl; popl %0; cli":"=r"(ef)::"memory");
+
+    PTASK tk=&task[IDLE_TASK_ID];
+
+    if (idle_task) {rc=RM_OK;goto done;}
+    if (!sys_gdt || !current_task || tk->state!=TASK_FREE)goto done;
+
+    int index=find_free_gdt();
+    if (index<0) {rc=RM_ERR_NOT_READY;goto done;}
+
+    memzero(tk,sizeof(TASK));
+    memzero(&runtime[IDLE_TASK_ID],sizeof(TASK_RUNTIME));
+
+    tk->id=IDLE_TASK_ID;
+    tk->state=TASK_CREATING;
+    memcpy(tk->name,"IDLE",5);
+
+    tk->entry=(DWORD)task_idle_entry;
+    tk->stack_base=(DWORD)idle_stack;
+    tk->stack_size=sizeof(idle_stack);
+    tk->tss_selector=(WORD)(index<<3);
+
+    DWORD stack_top=((DWORD)idle_stack+sizeof(idle_stack))&0xfffffff0u;
+
+    PTSS32 tss = &tk->tss;
+    tss->eip=(DWORD)task_idle_entry;
+    tss->esp=stack_top;
+    tss->eflags=0x2;
+    tss->cs = 0x08;
+    tss->ss = 0x10;
+    tss->ds = 0x10;
+    tss->es = 0x10;
+    tss->fs = 0x10;
+    tss->gs = 0x10;
+    tss->ss0 = 0x10;
+    tss->esp0 = stack_top;
+    tss->iomap_base = sizeof(TSS32);
+    SMP_SEG desc = {
+        .base = (DWORD)tss,
+        .limit = sizeof(TSS32) - 1,
+        .flag = GDT_ACC_TSS32_AVAIL,
+        .attr = 0,
+    };
+    seg_xlat_in(&desc, sys_gdt + index);
+    idle_task=tk;
+    asm volatile("":::"memory");
+    tk->state = TASK_READY;
+    rc=RM_OK;
+done:
+    asm volatile("pushl %0; popfl"::"r"(ef):"memory","cc");
+    return rc;
+}
+void task_block_locked(DWORD reason) {
+    PTASK self=current_task;
+    runtime[self->id].wait_reason=reason;
+    self->state=TASK_WAITING;
     task_schedule();
-    for (;;)asm volatile("hlt");
+}
+void task_wake_locked(DWORD id, DWORD reason) {
+    if (id>=TASK_MAX)return;
+    PTASK tk=&task[id];
+    if (tk->state==TASK_WAITING&&runtime[id].wait_reason==reason) {
+        runtime[id].wait_reason=TASK_WAIT_NONE;
+        tk->state=TASK_READY;
+    }
 }

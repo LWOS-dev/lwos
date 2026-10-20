@@ -36,6 +36,26 @@ void mem_pool_init();
 void mem_pool_dump(PMEM_POOL pool);
 PVOID mem_alloc_units(PMEM_POOL pool, DWORD count);
 
+/* Single-CPU allocator critical section. Hosted regression binaries have no
+ * hardware IRQs; freestanding OS builds must preserve the caller's IF. */
+static inline DWORD mem_irq_save(void) {
+#if !__STDC_HOSTED__
+    DWORD flags;
+    asm volatile("pushfl; popl %0; cli" : "=r"(flags) :: "memory");
+    return flags;
+#else
+    return 0;
+#endif
+}
+static inline void mem_irq_restore(DWORD flags) {
+#if !__STDC_HOSTED__
+    asm volatile("pushl %0; popfl" :: "r"(flags) : "memory", "cc");
+#else
+    (void)flags;
+#endif
+}
+
+/* Page-granular allocation; free accepts only the original base address. */
 PVOID kmalloc(int size);
 void kfree(PVOID ptr);
 

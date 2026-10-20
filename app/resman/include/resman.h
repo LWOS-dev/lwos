@@ -27,12 +27,15 @@ struct _RM_IMAGE {
 extern const PVOID lw_rm[LW_RM_SLOT_COUNT];
 
 int resman_main(PVOID *abi);
+int resman_autoload_ghost(void);
 
 int resman_init(void);
 DWORD resman_version(void);
 
 PVOID resman_alloc(DWORD size, DWORD align, DWORD tag);
 int resman_free(PVOID p);
+/* Private: reap calls this before allowing a task ID to be reused. */
+void resman_alloc_reap(DWORD owner);
 
 int resman_image_acquire(PRM_IMAGE *out);
 int resman_image_load(PCVOID file, DWORD file_size, WORD owner, PRM_IMAGE *out);
@@ -43,9 +46,16 @@ int resman_image_valid(PRM_IMAGE pimg);
 void resman_alarm(void);
 void resman_pcspk(int hz);
 void resman_pcspk_shut(void);
+int resman_keyboard_claim(void);
+int resman_keyboard_release(void);
+int resman_keyboard_own(void);
 
 void* resman_task_table(void);
 int resman_task_acquire(PTASK *out);
 int resman_task_create(PRM_IMAGE image, PCLW_ENV env, PDWORD out_id);
+
+int resman_task_exit(int exit_code);
+int resman_task_kill(DWORD id);
+int resman_task_reap(DWORD id, int *exit_code);
 
 #endif

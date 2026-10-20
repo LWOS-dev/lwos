@@ -4,7 +4,9 @@ RM_ELF := $(BIN_DIR)/resman.elf
 RM_BIN := $(BIN_DIR)/resman.bin
 RM_OBJS := $(BUILD_DIR)/$(RM_DIR)/head.o \
            $(BUILD_DIR)/$(RM_DIR)/resman.o \
+           $(BUILD_DIR)/$(RM_DIR)/autoload.o \
            $(BUILD_DIR)/$(RM_DIR)/task.o \
+           $(BUILD_DIR)/$(RM_DIR)/alloc.o \
            $(BUILD_DIR)/$(RM_DIR)/task_start.o \
 		   $(BUILD_DIR)/$(RM_DIR)/image.o \
            $(BUILD_DIR)/$(RM_DIR)/imgcall.o \
@@ -17,6 +19,7 @@ RM_OBJS := $(BUILD_DIR)/$(RM_DIR)/head.o \
 # resman 显式选择自己的库，使用 lib/build.mk 的 KERN 编译规则。
 # 初始化内存页分配器和 GDT；图形、UI、鼠标由应用按需链接。
 RM_LIB_SRCS := mem.c \
+               fs.c \
                bitmap.c \
                task.c \
 			   convert.c \

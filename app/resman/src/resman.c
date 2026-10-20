@@ -30,17 +30,21 @@ int resman_main(PVOID *abi)
 
         idt_init(resman_isr_table);
         pic_init();
+        if (task_idle_init()!=RM_OK)return RM_ERR_NOT_READY;
         if (resman_keyboard_init())return RM_ERR_NOT_READY;
         if (resman_pit_init())return RM_ERR_NOT_READY;
         initialized = 1;
+        /* Failure is nonfatal: retain monitor input and its text UI. */
+        resman_autoload_ghost();
     }
 
     lw_setcur(0);
     asm volatile("sti" : : : "memory");
-    lw_getk();
+    /* Remain on monitor's stack, but yield its CPU while host owns input.
+     * Do not let monitor initialize/redraw its text UI over the GUI host. */
+    resman_keyboard_wait_monitor();
+    if (lw_gfx_is_live()) lw_gfx_exit();
 
-    putxy("IRQ KEYBOARD READY",0,0);
-    
     return RM_OK;
 }
 

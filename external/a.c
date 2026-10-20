@@ -1,6 +1,4 @@
-#include "abi.h"
-#include "resman.h"
-#include "task.h"
+#include "fpu_check.h"
 
 PVOID *lw_abi_base;
 
@@ -17,7 +15,5 @@ int lwp_main(const LW_ENV *env) {
 
     if (!env->rm || !env->rm[LW_RM_SLOT_TASK_CURRENT])return -3;
     PTASK self=*(PTASK *)env->rm[LW_RM_SLOT_TASK_CURRENT];
-    /* Never yield: advancing both counters demonstrates timer preemption. */
-    for (;;)self->work_count+=1;
-    return 0;
+    return fpu_check(self,1);
 }

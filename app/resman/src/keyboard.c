@@ -1,4 +1,5 @@
 #include "../include/keyboard.h"
+#include "../include/task.h"
 #include "abi.h"
 
 #define QUEUE_SIZE 128u
@@ -9,6 +10,8 @@ static volatile DWORD head, tail;
 volatile DWORD kb_irq_cnt;
 volatile BYTE kb_last_sc;
 volatile DWORD kb_dropped;
+
+DWORD keyboard_owner=0;
 
 static DWORD lock(void)
 {
@@ -32,6 +35,7 @@ static void enqueue(BYTE scan)
     }
     scans[head]=scan;
     head=next;
+    task_wake_locked(keyboard_owner,TASK_WAIT_KEYBOARD);
 }
 
 void kb_irq(PISR_FRAME frame)
@@ -52,6 +56,10 @@ void kb_irq(PISR_FRAME frame)
 static int read_scan(PBYTE scan)
 {
     DWORD flags=lock();
+    if (!current_task || current_task->id!=keyboard_owner) {
+        unlock(flags);
+        return 0;
+    }
     int available=head!=tail;
     if (available) {
         *scan=scans[tail];
@@ -64,9 +72,15 @@ static int read_scan(PBYTE scan)
 static void wait_scan(void)
 {
     DWORD flags=lock();
-    /* 不擅自开启调用者关闭的中断；阻塞输入应在 IF=1 的前台使用。 */
-    if (head==tail && (flags&0x200))
-        asm volatile("sti; hlt; cli" : : : "memory");
+    if (!(flags&0x200)||!current_task) {
+        unlock(flags);
+        return;
+    }
+    while (1) {
+        int mine=current_task&&current_task->id==keyboard_owner;
+        if (mine&&head!=tail)break;
+        task_block_locked(TASK_WAIT_KEYBOARD);
+    }
     unlock(flags);
 }
 
@@ -120,4 +134,42 @@ int resman_keyboard_init(void) // 初始化键盘 IRQ1
     pic_irq_set(1,1);
     unlock(flags);
     return 0;
+}
+
+int resman_keyboard_set_owner(DWORD id) {
+    DWORD flags=lock();
+    int rc=RM_ERR_ARGUMENT;
+    if (id>=TASK_MAX)goto done;
+    DWORD stt=task[id].state;
+    if (stt!=TASK_READY&&stt!=TASK_RUNNING&&stt!=TASK_WAITING)goto done;
+    keyboard_owner=id;
+    if (id==0 || head!=tail)task_wake_locked(id,TASK_WAIT_KEYBOARD);
+    rc=RM_OK;
+done:
+    unlock(flags);
+    return rc;
+}
+
+/* Exit/kill call this with IRQs masked, before a task ID can be reused. */
+void resman_keyboard_task_gone(DWORD id)
+{
+    DWORD flags = lock();
+    if (keyboard_owner == id) {
+        keyboard_owner = 0;
+        /* Drop keys intended for the old UI. Wake monitor even without data:
+         * its boot wait is for ownership, not for a key to consume. */
+        tail = head;
+        task_wake_locked(0, TASK_WAIT_KEYBOARD);
+    }
+    unlock(flags);
+}
+
+void resman_keyboard_wait_monitor(void)
+{
+    DWORD flags = lock();
+    if ((flags & 0x200) && current_task == &task[0]) {
+        while (keyboard_owner != 0)
+            task_block_locked(TASK_WAIT_KEYBOARD);
+    }
+    unlock(flags);
 }

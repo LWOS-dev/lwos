@@ -6,4 +6,7 @@ extern volatile BYTE kb_last_sc;
 extern volatile DWORD kb_dropped;
 int resman_keyboard_init(void);
 void kb_irq(PISR_FRAME frame);
+int resman_keyboard_set_owner(DWORD id);
+void resman_keyboard_task_gone(DWORD id);
+void resman_keyboard_wait_monitor(void);
 #endif

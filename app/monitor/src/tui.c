@@ -1305,33 +1305,62 @@ const char* task_state_name(DWORD s) {
     }
     return "UNKNOWN ";
 }
+static DWORD ts_selected;
+static int ts_result, ts_exit_code;
 static void proc_ts(PTUI_AREA a, DWORD ctrl) {
-    (void)ctrl;
     if (!rm_base || !rm_base[LW_RM_SLOT_TASK_TABLE]) return;
     const TASK *task = (const TASK *)rm_base[LW_RM_SLOT_TASK_TABLE];
-    char text[256];
-    DWORD count=0;
-    set_attr(TUI_WHITE,TUI_BLUE);
-    putxy("F5=REFRESH",0,24);
-    //     01234567890123456789012345678901234567890123
-    putxy("ID       STATE    NAME             TICKS    WORK",a->x+1,a->y+1);
-    set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE);
-    for (int i=0; i<TASK_MAX; i++) {
-        if (task[i].state!=TASK_FREE && count<(DWORD)(a->h-3)) {
-            for (int p=0;p<256;p++)text[p]=' ';
-            hex_xlat(task[i].id,text,8);
-            text[8]=' ';
-            memcpy(text+9,task_state_name(task[i].state),8);
-            memcpy(text+18,task[i].name,strlen(task[i].name));
-            hex_xlat(task[i].run_ticks,text+34,8);
-            text[42]=' ';
-            hex_xlat(task[i].work_count,text+43,8);
-            text[51]=0;
-            putxy(text,a->x+1,a->y+2+count);
-            count++;
+    if (task[ts_selected].state==TASK_FREE)ts_selected=0;
+    if (focus==a->index) {
+        if (ctrl==VK_DOWN || ctrl==VK_UP) {
+            int step=ctrl==VK_DOWN ? 1 : -1;
+            for (int i=(int)ts_selected+step; i>=0 && i<TASK_MAX; i+=step) {
+                if (task[i].state!=TASK_FREE) { ts_selected=i; break; }
+            }
+        } else if (ctrl==VK_F8) {
+            ts_result=rm_base[LW_RM_SLOT_TASK_KILL] ?
+                rm_task_kill(ts_selected) : RM_ERR_NOT_READY;
+        } else if (ctrl==VK_F9) {
+            ts_result=rm_base[LW_RM_SLOT_TASK_REAP] ?
+                rm_task_reap(ts_selected,&ts_exit_code) : RM_ERR_NOT_READY;
+            if (!ts_result)ts_selected=0;
         }
     }
+    char text[80];
+    DWORD count=0, selected_row=0;
+    for (DWORD i=0;i<ts_selected;i++)if (task[i].state!=TASK_FREE)selected_row++;
+    DWORD rows=a->h-3;
+    DWORD first=selected_row>=rows ? selected_row-rows+1 : 0;
+    set_attr(TUI_WHITE,TUI_BLUE);
+    putxy("TAB=FOCUS UP/DOWN=SELECT F5=REFRESH F8=KILL F9=REAP",0,24);
+    putxy("LAST RESULT=",0,23);
+    hex_xlat((DWORD)ts_result,text,8);
+    putxy(text,12,23);
+    putxy("REAP EXIT=",22,23);
+    hex_xlat((DWORD)ts_exit_code,text,8);
+    putxy(text,32,23);
+    putxy("ID       STATE    NAME             TICKS    WORK     EXIT",a->x+1,a->y+1);
+    for (int i=0; i<TASK_MAX; i++) {
+        if (task[i].state==TASK_FREE)continue;
+        DWORD row=count++;
+        if (row<first || row>=first+rows)continue;
+        set_attr(i==(int)ts_selected ? TUI_BLACK : TUI_WHITE|TUI_LIGHT,
+                 i==(int)ts_selected ? TUI_AQUA : TUI_BLUE);
+        for (unsigned p=0;p<sizeof(text);p++)text[p]=' ';
+        hex_xlat(task[i].id,text,8);
+        text[8]=' ';
+        memcpy(text+9,task_state_name(task[i].state),8);
+        for (int n=0;n<15 && task[i].name[n];n++)text[18+n]=task[i].name[n];
+        hex_xlat(task[i].run_ticks,text+34,8);
+        text[42]=' ';
+        hex_xlat(task[i].work_count,text+43,8);
+        text[51]=' ';
+        hex_xlat((DWORD)task[i].exit_code,text+52,8);
+        text[60]=0;
+        putxy(text,a->x+1,a->y+2+row-first);
+    }
 }
+
 void tui_init() {
     video=(PVOID)0xb8000;
     subvideo=(PWORD)kmalloc(80*25*sizeof(WORD));
@@ -1400,7 +1429,7 @@ void tui_init() {
     area_task.w=72;
     area_task.h=20;
     area_task.name=name_area_ts;
-    area_task.index=-1;
+    area_task.index=1;
 
     fe_current_cluster=monitor_fs.root_cluster;
     strcpy(fe_path, "/");

@@ -13,6 +13,8 @@ const PVOID lw_rm[LW_RM_SLOT_COUNT]
     [LW_RM_SLOT_BSS_START] = (PVOID)__bss_start,
     [LW_RM_SLOT_BSS_END] = (PVOID)__bss_end,
     [LW_RM_SLOT_IDENT] = (PVOID)LW_RM_IDENT,
+    [LW_RM_SLOT_ALLOC] = (PVOID)resman_alloc,
+    [LW_RM_SLOT_FREE] = (PVOID)resman_free,
     [LW_RM_SLOT_VERSION] = (PVOID)resman_version,
     [LW_RM_SLOT_IMAGE_ACQUIRE] = (PVOID)resman_image_acquire,
     [LW_RM_SLOT_IMAGE_LOAD] = (PVOID)resman_image_load,
@@ -24,5 +26,8 @@ const PVOID lw_rm[LW_RM_SLOT_COUNT]
     [LW_RM_SLOT_TASK_TABLE] = (PVOID)task,
     [LW_RM_SLOT_TASK_CURRENT] = (PVOID)&current_task,
     [LW_RM_SLOT_TASK_ACQUIRE] = (PVOID)resman_task_acquire,
-    [LW_RM_SLOT_TASK_CREATE] = (PVOID)resman_task_create
+    [LW_RM_SLOT_TASK_CREATE] = (PVOID)resman_task_create,
+    [LW_RM_SLOT_TASK_EXIT] = (PVOID)resman_task_exit,
+    [LW_RM_SLOT_TASK_KILL] = (PVOID)resman_task_kill,
+    [LW_RM_SLOT_TASK_REAP] = (PVOID)resman_task_reap
 };

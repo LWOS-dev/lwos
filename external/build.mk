@@ -1,5 +1,5 @@
 # 外部程序: 每个 .c 对应一个可重定位 LWP EXE, 只通过公开 ABI 调用系统。
-EXTERNAL_NAMES = a b reddot \
+EXTERNAL_NAMES = memtest memloop a b exit ghost reddot \
 				 shader \
 				 xtal \
 				 calc
@@ -20,6 +20,7 @@ $(BUILD_DIR)/external/%.o: external/%.c external/build.mk
 	$(TOOL_C) $(EXTERNAL_CFLAGS) $(LIB_INC) -c $< -o $@
 
 # x87 keeps intermediates in extended precision otherwise; xtal requests float.
+$(BUILD_DIR)/external/a.o $(BUILD_DIR)/external/b.o: external/fpu_check.h
 $(BUILD_DIR)/external/xtal.o: EXTERNAL_CFLAGS += -fexcess-precision=standard
 $(BUILD_DIR)/external/xtal.o: external/xtal_lut.h
 
@@ -35,6 +36,15 @@ test-xtal: $(BUILD_DIR)/tests/xtal_test
 	$<
 .PHONY: test-xtal
 
+# GUI host 单独链接图形/UI 工具库；其他外部程序仍使用单对象链接规则。
+GHOST_LIB_OBJS := $(addprefix $(BUILD_DIR)/lib/app/, \
+    gfx.o ui.o mem.o bitmap.o convert.o string.o)
+
+$(BIN_DIR)/external/ghost.elf: $(BUILD_DIR)/external/ghost.o $(GHOST_LIB_OBJS) tools/mkexe/lwp.ld external/build.mk
+	@mkdir -p $(@D)
+	$(TOOL_LD) $(LDFLAGS) --emit-relocs -T tools/mkexe/lwp.ld \
+	    $(filter %.o,$^) $(LIBGCC) -o $@
+
 $(BIN_DIR)/external/%.elf: $(BUILD_DIR)/external/%.o tools/mkexe/lwp.ld
 	@mkdir -p $(@D)
 	$(TOOL_LD) $(LDFLAGS) --emit-relocs -T tools/mkexe/lwp.ld $< $(LIBGCC) -o $@
@@ -48,6 +58,7 @@ FSROOT_FILES += $(FSROOT)/GFX/XTAL.EXE
 FSROOT_FILES += $(FSROOT)/APP/CALC.EXE
 FSROOT_FILES += $(FSROOT)/A.EXE
 FSROOT_FILES += $(FSROOT)/B.EXE
+FSROOT_FILES += $(FSROOT)/GHOST.EXE
 
 $(FSROOT)/GFX/XTAL.EXE: $(BIN_DIR)/external/xtal.exe
 $(FSROOT)/GFX/SHADER.EXE: $(BIN_DIR)/external/shader.exe
@@ -55,8 +66,17 @@ $(FSROOT)/GFX/REDDOT.EXE: $(BIN_DIR)/external/reddot.exe
 $(FSROOT)/APP/CALC.EXE: $(BIN_DIR)/external/calc.exe
 $(FSROOT)/A.EXE: $(BIN_DIR)/external/a.exe
 $(FSROOT)/B.EXE: $(BIN_DIR)/external/b.exe
+$(FSROOT)/GHOST.EXE: $(BIN_DIR)/external/ghost.exe
 
 external: $(EXTERNAL_EXES)
 .PHONY: external
 .SECONDARY: $(addprefix $(BUILD_DIR)/external/,$(addsuffix .o,$(EXTERNAL_NAMES))) \
     $(addprefix $(BIN_DIR)/external/,$(addsuffix .elf,$(EXTERNAL_NAMES)))
+
+FSROOT_FILES += $(FSROOT)/EXIT.EXE
+$(FSROOT)/EXIT.EXE: $(BIN_DIR)/external/exit.exe
+
+$(BUILD_DIR)/external/memtest.o $(BUILD_DIR)/external/memloop.o: external/memcheck.h
+FSROOT_FILES += $(FSROOT)/MEMTEST.EXE $(FSROOT)/MEMLOOP.EXE
+$(FSROOT)/MEMTEST.EXE: $(BIN_DIR)/external/memtest.exe
+$(FSROOT)/MEMLOOP.EXE: $(BIN_DIR)/external/memloop.exe

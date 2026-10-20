@@ -123,7 +123,7 @@ void mem_pool_dump(PMEM_POOL pool) {
     lw_put_dword(pool->unit_size*4096-1);
     lw_puts("\n\r");
 }
-PVOID mem_alloc_units(PMEM_POOL pool, DWORD count) {
+static PVOID mem_alloc_units_unlocked(PMEM_POOL pool, DWORD count) {
     int pos;
     if (!pool || !count || count>mem_bm.nbits)return 0;
     pos = bitmap_find_zero_run(&mem_bm, 0, (int)count);
@@ -135,43 +135,43 @@ PVOID mem_alloc_units(PMEM_POOL pool, DWORD count) {
     return (PVOID)(pool->base*4096);
 }
 
-PVOID kmalloc(int size) {
-    if (size<0)return 0;
-    int cnt=(size+4095)/4096;
-    //lw_put_dword(size);
-    //lw_puts(" NEED\n\r");
- 
-    PVOID ptr=0;
+PVOID mem_alloc_units(PMEM_POOL pool, DWORD count) {
+    DWORD flags=mem_irq_save();
+    PVOID ptr=mem_alloc_units_unlocked(pool,count);
+    mem_irq_restore(flags);
+    return ptr;
+}
 
+static PVOID kmalloc_unlocked(int size) {
+    if (size<=0 || size>0x7ffff000 || !mem_pool)return 0;
+    DWORD cnt=((DWORD)size+4095)/4096;
     for (int i=0; i<MEM_POOL_MAX; i++) {
         if (mem_pool[i].unit_size==0) {
-            //lw_put_dword(cnt);
-            //lw_puts(" BLOCKS\n\r");
-            ptr=mem_alloc_units(&mem_pool[i], cnt);
-            if (!ptr) {
-                return (PVOID)-1;
-            }
-            return ptr;
+            PVOID ptr=mem_alloc_units_unlocked(&mem_pool[i],cnt);
+            return ptr ? ptr : (PVOID)-1;
         }
     }
-    lw_puts("OUT OF MEMORY\n\r");
-    return (PVOID)-2; // out of memory
+    return (PVOID)-2;
 }
-void kfree(PVOID ptr) {
-    if (ptr<(PVOID)0)return;
 
-    for (int i=0; i<MEM_POOL_MAX; i++) {
-        if (mem_pool[i].unit_size==0)continue;
-        if (
-            ((int)ptr>=(mem_pool[i].base*4096)) &&
-            ((int)ptr<(mem_pool[i].base*4096+mem_pool[i].unit_size*4096))
-        ) {
-            bitmap_clear_range(
-                &mem_bm, mem_pool[i].base, mem_pool[i].unit_size
-            );
+PVOID kmalloc(int size) {
+    DWORD flags=mem_irq_save();
+    PVOID ptr=kmalloc_unlocked(size);
+    mem_irq_restore(flags);
+    return ptr;
+}
+
+void kfree(PVOID ptr) {
+    if (!ptr)return;
+    DWORD flags=mem_irq_save();
+    if (mem_pool)for (int i=0; i<MEM_POOL_MAX; i++) {
+        if (!mem_pool[i].unit_size)continue;
+        if (ptr==(PVOID)(unsigned long)(mem_pool[i].base*4096u)) {
+            bitmap_clear_range(&mem_bm,mem_pool[i].base,mem_pool[i].unit_size);
             mem_pool[i].base=0;
             mem_pool[i].unit_size=0;
-            return;
+            break;
         }
     }
+    mem_irq_restore(flags);
 }

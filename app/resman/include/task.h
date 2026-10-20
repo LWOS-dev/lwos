@@ -4,10 +4,19 @@
 #include "../../../lib/include/task.h"
 #include "../../../lib/include/resman.h"
 
+typedef enum {
+    TASK_WAIT_NONE,
+    TASK_WAIT_KEYBOARD,
+    TASK_WAIT_TIMER
+} TASK_WAIT_REASON; // 等待理由
+
 /* RESMAN 私有运行时状态；应用通过映像头槽位访问。 */
 typedef struct _TASK_RUNTIME {
     PRM_IMAGE image;
     LW_ENV env;
+    DWORD wait_reason; // 等待理由
+    BYTE fpu_state[108]; /* 32-bit FNSAVE/FRSTOR image (x87 only). */
+    BYTE fpu_valid;
 } TASK_RUNTIME, *PTASK_RUNTIME;
 
 extern PSEG_DESC sys_gdt;
@@ -28,5 +37,8 @@ void idt_update(void);
 void double_fault_init(void);
 void task_register_load(void);
 int bootstrap_tss_init(void);
+int task_idle_init(void);
+void task_block_locked(DWORD reason);
+void task_wake_locked(DWORD id, DWORD reason);
 
 #endif

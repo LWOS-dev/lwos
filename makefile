@@ -230,3 +230,14 @@ $(TUI_EXECUTE_TEST): tests/tui_execute_test.c tests/tui_hex_test.c app/monitor/s
 test-tui-execute: $(TUI_EXECUTE_TEST)
 	$(TUI_EXECUTE_TEST)
 .PHONY: test-tui-execute
+
+ALLOC_TEST = $(BUILD_DIR)/tests/alloc_test
+$(ALLOC_TEST): tests/alloc_test.c lib/src/mem.c lib/src/bitmap.c lib/include/mem.h lib/include/bitmap.h
+	@mkdir -p $(@D)
+	$(TOOL_C) -std=gnu11 -fno-builtin -ffunction-sections -fdata-sections \
+	    -Wl,--gc-sections -Wall -Wextra -Ilib/include \
+	    tests/alloc_test.c lib/src/mem.c lib/src/bitmap.c -o $@
+
+test-alloc: $(ALLOC_TEST)
+	$<
+.PHONY: test-alloc

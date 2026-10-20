@@ -5,6 +5,7 @@ global task_start
 extern task_bootstrap
 
 task_start:
+    clts
     cld
     and esp, -16
     call task_bootstrap

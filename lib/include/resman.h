@@ -11,6 +11,7 @@ typedef int (*RESMAN_ENTRY)(PVOID *abi);
 #define LW_RM_IDENT 0x4d52574cu
 #define LW_ENV_VERSION 1u
 #define RM_OWNER_SYSTEM 0u
+#define RM_TASK_EXIT_KILLED (-128)
 
 enum {
     RM_OK = 0,
@@ -44,6 +45,9 @@ enum {
     LW_RM_SLOT_TASK_CURRENT = 0x54,
     LW_RM_SLOT_TASK_ACQUIRE = 0x55,
     LW_RM_SLOT_TASK_CREATE = 0x56,
+    LW_RM_SLOT_TASK_EXIT = 0x57,
+    LW_RM_SLOT_TASK_KILL = 0x58,
+    LW_RM_SLOT_TASK_REAP = 0x59,
     LW_RM_SLOT_COUNT
 };
 
@@ -65,12 +69,23 @@ int rm_attach(PVOID base);
 
 #define RM_CALL(slot, type) ((type)rm_base[slot])
 #define rm_version              RM_CALL(LW_RM_SLOT_VERSION,         DWORD (*)(void))
+/* Page-granular, uninitialized memory. size > 0; align=0 or power-of-two
+ * <=4096. NULL on failure. tag is recorded for diagnostics, not an owner ID.
+ * free(NULL) succeeds; otherwise only an owned, live allocation base is valid.
+ * Background allocations are collected at task reap. F4 shares task 0 and
+ * must explicitly free its allocations. These checks do not isolate memory. */
 #define rm_alloc                RM_CALL(LW_RM_SLOT_ALLOC,           PVOID (*)(DWORD, DWORD, DWORD))
 #define rm_free                 RM_CALL(LW_RM_SLOT_FREE,            int (*)(PVOID))
 #define rm_image_load           RM_CALL(LW_RM_SLOT_IMAGE_LOAD,      int (*)(PCVOID, DWORD, WORD, PRM_IMAGE *))
 #define rm_image_run            RM_CALL(LW_RM_SLOT_IMAGE_RUN,       int (*)(PRM_IMAGE, PCLW_ENV, int *))
 #define rm_image_unload         RM_CALL(LW_RM_SLOT_IMAGE_UNLOAD,    int (*)(PRM_IMAGE))
 #define rm_task_create          RM_CALL(LW_RM_SLOT_TASK_CREATE,     int (*)(PRM_IMAGE, PCLW_ENV, PDWORD))
+/* exit: success never returns; monitor/foreground calls return an error.
+ * kill: stop another live task. reap: nonblocking, DEAD only; returns its
+ * exit code and releases image, stack, GDT and slot. IDs are reusable slots. */
+#define rm_task_exit            RM_CALL(LW_RM_SLOT_TASK_EXIT,       int (*)(int))
+#define rm_task_kill            RM_CALL(LW_RM_SLOT_TASK_KILL,       int (*)(DWORD))
+#define rm_task_reap            RM_CALL(LW_RM_SLOT_TASK_REAP,       int (*)(DWORD, int *))
 #define rm_alarm                RM_CALL(LW_RM_SLOT_ALARM,           void (*)(void))
 
 #endif

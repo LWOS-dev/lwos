@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start two non-yielding tasks through F7; verify TSS preemption and UI."""
+"""Start A/B x87 checks through F7; verify preemption, FPU isolation and UI."""
 import json
 import shutil
 import socket
@@ -23,6 +23,8 @@ def check(machine):
         work = Path(directory)
         disk = work/'test.img'
         shutil.copyfile(ROOT/'lwcnc.img', disk)
+        # Exercise the monitor path without reserving task 1 for boot's GUI.
+        subprocess.run(['mdel', '-i', f'{disk}@@{2048*512}', '::/GHOST.EXE'], check=True)
         sock = work/'qmp.sock'
         guest = subprocess.Popen([
             'qemu-system-i386', '-machine', machine, '-accel', 'tcg', '-m', '32',
@@ -65,7 +67,6 @@ def check(machine):
 
                 qmp('qmp_capabilities')
                 time.sleep(.5)
-                key('a')  # RESMAN startup wait
                 key('a')  # Monitor's startup alarm wait
                 for _ in range(100):
                     if 'FILE EXPLORER' in screen():break
@@ -75,6 +76,8 @@ def check(machine):
                 count=int.from_bytes(memory(SYMS['filelist_length'],4),'little')
                 pointer=SYMS['filelist_ptr']
                 entries=memory(pointer,count*24)
+                baseline=memory(0x300000,0x20000)
+                gdt_before=memory(0x360000,65536)
                 selected=0
                 for filename in (b'A       EXE', b'B       EXE'):
                     index=next(i for i in range(count) if entries[i*24:i*24+11]==filename)
@@ -84,18 +87,26 @@ def check(machine):
                 # TASK has a 104-byte TSS at +60 and a work counter at +164.
                 def task(n):
                     raw=memory(RM['task']+n*168,168)
+                    state=int.from_bytes(raw[4:8],'little')
+                    result=int.from_bytes(raw[52:56],'little',signed=True)
+                    assert state in ((2,3,4) if n == 0 else (2,3)), (n,state,result,raw.hex())
                     return (raw[8:24].split(b'\0')[0],
                             int.from_bytes(raw[48:52],'little'),
                             int.from_bytes(raw[164:168],'little'))
                 first=[task(n) for n in range(3)]
-                time.sleep(.5)
-                second=[task(n) for n in range(3)]
-                assert [t[0] for t in second]==[b'MONITOR',b'A.EXE',b'B.EXE'],second
-                for old,new in zip(first,second):assert new[1]>old[1], (first,second)
-                for old,new in zip(first[1:],second[1:]):assert new[2]!=old[2], (first,second)
+                for _ in range(5):
+                    time.sleep(.5)
+                    second=[task(n) for n in range(3)]
+                    assert [t[0] for t in second]==[b'MONITOR',b'A.EXE',b'B.EXE'],second
+                    assert second[0][1]>=first[0][1], (first,second)
+                    for old,new in zip(first[1:],second[1:]):assert new[1]>old[1], (first,second)
+                    for old,new in zip(first[1:],second[1:]):
+                        assert new[2]!=old[2] and new[2]<0x80000000, (first,second)
+                    first=second
                 # A returning task becomes DEAD without stalling the other tasks.
                 index=next(i for i in range(count) if entries[i*24:i*24+11]==b'TEST    EXE')
                 for _ in range(abs(index-selected)):key('down' if index>selected else 'up')
+                selected=index
                 key('f7')
                 time.sleep(.2)
                 dead=memory(RM['task']+3*168,168)
@@ -107,7 +118,79 @@ def check(machine):
                 key('ret')
                 text=screen()
                 assert 'A.EXE' in text and 'B.EXE' in text and 'WORK' in text,text
-                print(f'PASS: {machine} A/B counters and all three tick counts advance; TASKS UI responsive',flush=True)
+                key('tab')  # focus TASKS table
+                key('f8')  # monitor cannot be killed
+                key('f9')  # monitor cannot be reaped
+                assert int.from_bytes(memory(SYMS['ts_result'],4),'little',signed=True)==-1
+                key('down')  # A
+                key('f9')  # a live task cannot be reaped
+                assert int.from_bytes(memory(SYMS['ts_result'],4),'little',signed=True)==-2
+                task(1)
+                key('f8')
+                killed=memory(RM['task']+168,168)
+                assert int.from_bytes(killed[4:8],'little')==5
+                assert int.from_bytes(killed[52:56],'little',signed=True)==-128
+                time.sleep(.2)
+                assert memory(RM['task']+168,168)==killed, 'killed task still running'
+                key('f9')
+                assert memory(RM['task']+168,168)==bytes(168)
+                key('down')  # B (A is now absent)
+                task(2)  # survivor still has intact FPU state
+                key('f8'); key('f9')
+                key('down')  # TEST, naturally DEAD
+                key('f8')  # repeated termination must preserve its exit code
+                assert int.from_bytes(memory(RM['task']+3*168+52,4),'little')==42
+                key('f9')
+                assert int.from_bytes(memory(SYMS['ts_exit_code'],4),'little')==42
+                assert memory(0x300000,0x20000)==baseline, 'image/stack allocation leak'
+                assert memory(0x360000,65536)==gdt_before, 'GDT slot leak'
+                key('f9')  # selection reset to monitor, protected again
+
+                def explorer():
+                    for _ in range(3):key('tab')  # table focus 1 -> menu 0
+                    for _ in range(4):key('up')
+                    key('ret')
+                    for _ in range(3):key('tab')
+
+                def tasks_page():
+                    key('tab')
+                    for _ in range(4):key('down')
+                    key('ret'); key('tab')
+
+                # Reuse the same task/image/GDT slots and FPU runtime storage.
+                for filename,expected in [(b'EXIT    EXE',7),(b'TEST    EXE',42),(b'MEMTEST EXE',29)]*2:
+                    explorer()
+                    index=next(i for i in range(count) if entries[i*24:i*24+11]==filename)
+                    for _ in range(abs(index-selected)):key('down' if index>selected else 'up')
+                    selected=index
+                    key('f7')
+                    time.sleep(.15)
+                    dead=memory(RM['task']+168,168)
+                    assert int.from_bytes(dead[4:8],'little')==5,dead.hex()
+                    assert int.from_bytes(dead[52:56],'little',signed=True)==expected,dead.hex()
+                    tasks_page(); key('down'); key('f9')
+                    assert int.from_bytes(memory(SYMS['ts_exit_code'],4),'little')==expected
+                    assert memory(0x300000,0x20000)==baseline, 'repeat allocation leak'
+                    assert memory(0x360000,65536)==gdt_before, 'repeat GDT leak'
+                    assert memory(RM['task']+168,168*62)==bytes(168*62)
+                explorer()
+                index=next(i for i in range(count) if entries[i*24:i*24+11]==b'MEMLOOP EXE')
+                for _ in range(abs(index-selected)):key('down' if index>selected else 'up')
+                selected=index
+                key('f7'); key('f7')
+                first=[task(n) for n in (1,2)]
+                time.sleep(.5)
+                second=[task(n) for n in (1,2)]
+                for old,new in zip(first,second):assert new[2]>old[2],(first,second)
+                tasks_page(); key('down'); key('f8'); key('f9')
+                survivor=task(2)
+                time.sleep(.3)
+                assert task(2)[2]>survivor[2], 'other task heap damaged by reap'
+                key('down'); key('f8'); key('f9')
+                assert memory(0x300000,0x20000)==baseline, 'killed task allocation leak'
+                assert memory(0x360000,65536)==gdt_before
+                assert memory(RM['allocations'],16384*12)==bytes(16384*12), 'owner records leaked'
+                print(f'PASS: {machine} x87 isolation; return/exit/kill/reap; protected monitor; slot reuse; concurrent alloc/free; normal/killed heap reclamation; no bitmap/GDT leak',flush=True)
                 qmp('quit'); guest.wait(timeout=3)
         finally:
             if guest.poll() is None:guest.terminate();guest.wait(timeout=3)
