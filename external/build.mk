@@ -1,7 +1,8 @@
 # 外部程序: 每个 .c 对应一个可重定位 LWP EXE, 只通过公开 ABI 调用系统。
 EXTERNAL_NAMES = reddot \
 				 shader \
-				 xtal
+				 xtal \
+				 calc
 EXTERNAL_EXES = $(addprefix $(BIN_DIR)/external/,$(addsuffix .exe,$(EXTERNAL_NAMES)))
 EXTERNAL_CFLAGS = $(CFLAGS_APP) -nostdinc -fno-pic \
     -fno-asynchronous-unwind-tables -fno-unwind-tables -Werror
@@ -44,10 +45,12 @@ $(BIN_DIR)/external/%.exe: $(BIN_DIR)/external/%.elf $(EXTERNAL_MKEXE)
 FSROOT_FILES += $(FSROOT)/GFX/REDDOT.EXE
 FSROOT_FILES += $(FSROOT)/GFX/SHADER.EXE
 FSROOT_FILES += $(FSROOT)/GFX/XTAL.EXE
+FSROOT_FILES += $(FSROOT)/APP/CALC.EXE
 
 $(FSROOT)/GFX/XTAL.EXE: $(BIN_DIR)/external/xtal.exe
 $(FSROOT)/GFX/SHADER.EXE: $(BIN_DIR)/external/shader.exe
 $(FSROOT)/GFX/REDDOT.EXE: $(BIN_DIR)/external/reddot.exe
+$(FSROOT)/APP/CALC.EXE: $(BIN_DIR)/external/calc.exe
 
 external: $(EXTERNAL_EXES)
 .PHONY: external

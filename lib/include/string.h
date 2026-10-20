@@ -9,6 +9,8 @@ int strcmp(PCSTR s1, PCSTR s2);
 int strncmp(PCSTR s1, PCSTR s2, int n);
 unsigned int strlen(PCSTR s);
 PSTR strcpy(PSTR dest, PCSTR src);
+PSTR strchr(PCSTR str, int c);
+PSTR strcat(PSTR dst, PCSTR src);
 void skip_ws(PPCSTR p);
 int strcspn(PCSTR src, PCSTR reject);
 

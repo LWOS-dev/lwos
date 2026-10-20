@@ -386,8 +386,11 @@ static void subproc_fi(PTUI_AREA a, DWORD fileindex) {
 static void showmessage(const char* ctx) {
     memcpy(subvideo,video,80*25*sizeof(WORD));
     int window_width=strlen(ctx)+4;
-    set_attr(TUI_BLACK,TUI_WHITE);
     for (int i=0; i<window_width; i++) {
+        set_attr(TUI_BLACK,TUI_AQUA);
+        putxyc(' ',40-window_width/2+i,10);
+        putxy("MESSAGE",43-window_width/2,10);
+        set_attr(TUI_BLACK,TUI_WHITE);
         for (int j=0; j<3; j++) {
             putxyc(' ',40-window_width/2+i,11+j);
         }
@@ -395,6 +398,39 @@ static void showmessage(const char* ctx) {
     putxy(ctx,40-window_width/2+2,12);
     lw_getk();
     memcpy(video,subvideo,80*25*sizeof(WORD));
+}
+static int typebox(char* target) {
+    char text[256];
+    int count=0;
+    char t;
+    memcpy(subvideo,video,80*25*sizeof(WORD));
+    for (int i=0; i<50; i++) {
+        set_attr(TUI_BLACK,TUI_AQUA);
+        putxyc(' ',15+i,10);
+        set_attr(TUI_BLACK,TUI_WHITE);
+        for (int j=0; j<3; j++) {
+            putxyc(' ',15+i,11+j);
+        }
+    }
+    set_attr(TUI_BLACK,TUI_AQUA);
+    hex_xlat((DWORD)target,text,8);
+    //     7890123456
+    putxy("TYPE TO ",17,10);
+    putxy(text,25,10);
+    set_attr(TUI_BLACK,TUI_WHITE);
+    while (1) {
+        t=lw_getk();
+        putxyc(t,16+count,12);
+        text[count++]=t;
+        if (t==0xa){count--;break;}
+    }
+    text[count]=0;
+    memcpy(video,subvideo,80*25*sizeof(WORD));
+    if (!target) {
+        return count;
+    }
+    memcpy(target,text,count);
+    return count;
 }
 /* Single foreground call: every path closes the file and releases owned memory. */
 static WORD exe_screen[80*25];
@@ -475,13 +511,50 @@ cleanup:
     }
     showmessage(message);
 }
+static int valid_name(const char* src, char* dst) {
+    char buf[13];
+    int n=0, e=0, dot=0, i=0;
+    if (!src || !dst) return 0;
+    while (*src) {
+        BYTE c=*src++;
+        if (c=='.') {
+            if (dot || !n) return 0;
+            dot=1;
+        } else {
+            if (!((c>='A' && c<='Z') ||
+                (c>='a' && c<='z') ||
+                (c>='0' && c<='9') ||
+                strchr("$%\'-_@~`!(){}^#&", c)))
+                return 0;
+            if (dot?++e>3:++n>8)return 0;
+            if (c>='a'&&c<='z')c-=32; // to upper
+        }
+        buf[i++]=c;
+    }
+    if (!n || (dot&&!e)) return 0;
+    buf[i] = 0;
+    strcpy(dst, buf);
+    return 1;
+}
+static void extract_path(char* str) { // 提取上级目录的路径
+    char* last=0;
+    for (char*p=str;*p;p++) {
+        if (*p=='/')last=p;
+    }
+    if (last) {
+        last[1]=0;
+    } else {
+        str[0]=0;
+    }
+}
 static void proc_fe(PTUI_AREA a, DWORD ctrl) {
     char text[100];
     char path[256];
+    char t[256];
     set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE);
     if (focus==a->index) {
-        putxy("F5=REFRESH  F2/ENTER=ENTER DIR  F6=HEX EDITOR  UP/DOWN=SELECT",0,23);
-        putxy("F4=EXECUTE",0,24);
+        putxy("F5=REFRESH  ENTER=ENTER DIR     F6=HEX EDITOR  UP/DOWN=SELECT",0,23);
+        putxy("F4=EXECUTE  F8=CREATE FILE      F9=CREATE FOLDER",0,24);
         switch (ctrl) {
             case VK_F4:
                 if (fe_index<filelist_length && !(filelist_ptr[fe_index].attr&0x10)) {
@@ -490,6 +563,29 @@ static void proc_fe(PTUI_AREA a, DWORD ctrl) {
                     else fe_execute(path);
                 }
                 break;
+            case VK_F8: {
+                memzero(t,256);
+                memzero(text,100);
+                int l=typebox(text);
+                int err;
+                if (!l)break;
+                if (!valid_name(text,t))break;
+                showmessage(t);
+                memzero(text,40);
+                fe_entry_path(&filelist_ptr[fe_index],path);
+                extract_path(path);
+                strcat(path,t);
+                //           01234567890123
+                strcpy(text,"TOUCH FILE ");
+                strcat(text,path);
+                showmessage(text);
+                err=fs_touch(&monitor_fs,path);
+                if (err) {
+                    showmessage("FAILED");
+                    break;
+                }
+                break;
+            }
             case VK_F5: proc_fe_update_list(); break;
             case VK_UP: if (fe_index)fe_index--; break;
             case VK_DOWN: if (fe_index+1<filelist_length)fe_index++; break;
@@ -497,7 +593,6 @@ static void proc_fe(PTUI_AREA a, DWORD ctrl) {
                 if (fe_index<filelist_length)hex_open(&filelist_ptr[fe_index]);
                 break;
             case VK_ENTER:
-            case VK_F2:
                 if (fe_index<filelist_length && (filelist_ptr[fe_index].attr & 0x10)) {
                     char path[256];
                     SFT_T target;

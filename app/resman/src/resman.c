@@ -36,7 +36,6 @@ int resman_main(PVOID *abi)
     }
 
     lw_setcur(0);
-    screen_fill(TUI_BLUE);
     asm volatile("sti" : : : "memory");
     lw_getk();
 

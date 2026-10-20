@@ -88,3 +88,19 @@ CHAR to_avail(BYTE c) {
     if (c>=0x20 && c<=0x7f)return c;
     return '.';
 }
+
+PSTR strchr(PCSTR str, int c) {
+    while (*str) {
+        if (*str==(char)c)
+            return (char*)str;
+        str++;
+    }
+    return c==0?(char*)str:0;
+}
+
+PSTR strcat(PSTR dst, PCSTR src) {
+    PSTR p=dst;
+    while (*p)p++;
+    while ((*p++=*src++));
+    return dst;
+}
