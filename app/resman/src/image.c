@@ -2,10 +2,11 @@
 #include "abi.h"
 #include "mem.h"
 
-static RM_IMAGE images[RM_MAX_IMAGES];
+RM_IMAGE images[RM_MAX_IMAGES];
 
-static PRM_IMAGE image_acquire(void)
-{
+int resman_image_acquire(PRM_IMAGE *out) {
+    if (!out)return RM_ERR_ARGUMENT;
+    *out=0;
     for (DWORD i = 0; i < RM_MAX_IMAGES; i++) {
         PRM_IMAGE image = &images[i];
 
@@ -14,10 +15,11 @@ static PRM_IMAGE image_acquire(void)
 
         memzero(image, sizeof(*image));
         image->state = RM_IMAGE_LOADING;
-        return image;
+        *out=image;
+        return RM_OK;
     }
 
-    return 0; /* 槽位用完 */
+    return RM_ERR_NOT_READY; /* 槽位用完 */
 }
 
 int resman_image_load(PCVOID file, DWORD file_size, WORD owner, PRM_IMAGE *out) {
@@ -62,8 +64,10 @@ int resman_image_load(PCVOID file, DWORD file_size, WORD owner, PRM_IMAGE *out) 
         }
     }
 
-    pimg=image_acquire();
-    if (!pimg)return -11;
+    //pimg=image_acquire();
+    //if (!pimg)return -11;
+    int err=resman_image_acquire(&pimg);
+    if (err)return -11;
 
     base=kmalloc(plhdr->mem_size);
     if (!base || base==(PVOID)-1 || base==(PVOID)-2) {
@@ -167,6 +171,9 @@ int resman_image_unload(PRM_IMAGE image) {
     }
     memzero(image,sizeof(*image));
     return RM_OK;
+}
+int resman_image_valid(PRM_IMAGE pimg) {
+    return image_handle_valid(pimg);
 }
 /*
 struct _RM_IMAGE {

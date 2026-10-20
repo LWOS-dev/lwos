@@ -432,9 +432,9 @@ static int typebox(char* target) {
     memcpy(target,text,count);
     return count;
 }
-/* Single foreground call: every path closes the file and releases owned memory. */
+/* F4 runs synchronously; F7 transfers the loaded image to a background task. */
 static WORD exe_screen[80*25];
-static void fe_execute(const char *path) {
+static void fe_launch(const char *path, int background) {
     FS_FILE file={0};
     PBYTE buffer=0;
     PRM_IMAGE image=0;
@@ -477,6 +477,27 @@ static void fe_execute(const char *path) {
     kfree(buffer);
     buffer=0; /* RESMAN owns a separate copy of the executable. */
 
+    if (background) {
+        DWORD id;
+        stage="TASK";
+        if (!rm_base[LW_RM_SLOT_TASK_CREATE] || !rm_base[LW_RM_SLOT_TASK_TABLE]) {
+            err=RM_ERR_NOT_READY;
+            goto cleanup;
+        }
+        err=rm_task_create(image,0,&id);
+        if (err)goto cleanup;
+        TASK *tasks=(TASK *)rm_base[LW_RM_SLOT_TASK_TABLE];
+        const char *name=path;
+        for (const char *p=path; *p; p++)if (*p=='/')name=p+1;
+        unsigned n=0;
+        while (name[n] && n<sizeof(tasks[id].name)-1) {
+            tasks[id].name[n]=name[n]; n++;
+        }
+        tasks[id].name[n]=0;
+        /* Ownership passed to the task; do not unload its live image. */
+        image=0;
+        return;
+    }
     stage="RUN";
     BYTE saved_attr=vi_attr;
     memcpy(exe_screen,video,sizeof(exe_screen));
@@ -536,6 +557,8 @@ static int valid_name(const char* src, char* dst) {
     strcpy(dst, buf);
     return 1;
 }
+static void fe_execute(const char *path) { fe_launch(path,0); }
+
 static void extract_path(char* str) { // 提取上级目录的路径
     char* last=0;
     for (char*p=str;*p;p++) {
@@ -554,12 +577,14 @@ static void proc_fe(PTUI_AREA a, DWORD ctrl) {
     set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE);
     if (focus==a->index) {
         putxy("F5=REFRESH  ENTER=ENTER DIR     F6=HEX EDITOR  UP/DOWN=SELECT",0,23);
-        putxy("F4=EXECUTE  F8=CREATE FILE      F9=CREATE FOLDER",0,24);
+        putxy("F4=EXECUTE  F7=BACKGROUND       F8=CREATE FILE",0,24);
         switch (ctrl) {
+            case VK_F7:
             case VK_F4:
                 if (fe_index<filelist_length && !(filelist_ptr[fe_index].attr&0x10)) {
                     int err=fe_entry_path(&filelist_ptr[fe_index],path);
                     if (err)fe_error=err;
+                    else if (ctrl==VK_F7)fe_launch(path,1);
                     else fe_execute(path);
                 }
                 break;
@@ -1281,23 +1306,29 @@ const char* task_state_name(DWORD s) {
     return "UNKNOWN ";
 }
 static void proc_ts(PTUI_AREA a, DWORD ctrl) {
+    (void)ctrl;
     if (!rm_base || !rm_base[LW_RM_SLOT_TASK_TABLE]) return;
     const TASK *task = (const TASK *)rm_base[LW_RM_SLOT_TASK_TABLE];
     char text[256];
     DWORD count=0;
     set_attr(TUI_WHITE,TUI_BLUE);
+    putxy("F5=REFRESH",0,24);
     //     01234567890123456789012345678901234567890123
-    putxy("ID       STATE    NAME",a->x+1,a->y+1);
+    putxy("ID       STATE    NAME             TICKS    WORK",a->x+1,a->y+1);
     set_attr(TUI_WHITE|TUI_LIGHT,TUI_BLUE);
     for (int i=0; i<TASK_MAX; i++) {
-        if (task[i].state!=TASK_FREE) {
+        if (task[i].state!=TASK_FREE && count<(DWORD)(a->h-3)) {
             for (int p=0;p<256;p++)text[p]=' ';
             hex_xlat(task[i].id,text,8);
             text[8]=' ';
             memcpy(text+9,task_state_name(task[i].state),8);
             memcpy(text+18,task[i].name,strlen(task[i].name));
-            text[33]=0;
+            hex_xlat(task[i].run_ticks,text+34,8);
+            text[42]=' ';
+            hex_xlat(task[i].work_count,text+43,8);
+            text[51]=0;
             putxy(text,a->x+1,a->y+2+count);
+            count++;
         }
     }
 }

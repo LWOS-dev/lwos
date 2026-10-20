@@ -42,3 +42,25 @@ CPU 渲染默认按约 320×200 的采样密度填充像素块，保持屏幕宽
 
 `make test-xtal` 执行宿主 LUT 误差和两组视角的渲染检查；
 `build/tests/xtal_test /tmp/xtal.ppm` 另存首帧预览。
+
+## A/B 抢占式多任务演示
+
+`make` 会把 `a.c`、`b.c` 编译为镜像根目录的 `A.EXE`、`B.EXE`。
+启动 `make run`，按键通过启动等待后：
+
+1. Tab 切到文件浏览器，分别选中 `A.EXE`、`B.EXE`，各按一次 **F7** 后台启动。
+2. Tab 回到左侧菜单，选 **TASKS**，按 Enter。
+3. 页面按 **ID + NAME** 区分任务；任务 0 是 MONITOR。**TICKS** 为调度时钟计数，
+   **WORK** 为程序自己的循环计数（十六进制，32 位溢出回绕）。按 **F5** 刷新观察变化。
+
+A 每轮给自己的 WORK 加 1，B 加 2；两个循环都没有 sleep/yield。
+PIT 以 100 Hz 触发 IRQ0，EOI 后通过 TSS far JMP 轮转 READY 任务，
+因此 A、B 都持续运行，MONITOR 也仍能响应键盘。同一个文件启动多次会得到不同 ID。
+F4 保持原来的同步执行行为；这两个死循环请用 F7 启动。
+
+这是整数任务的最小演示：尚未保存/恢复 FPU 状态，共享 ABI/文件系统也没有并发保护，
+因此暂不使用 F7 运行图形、浮点或并发 I/O 程序。任务返回后记录 DEAD 和退出码，
+映像、栈和任务槽暂时保留；死循环通过重启模拟器结束。
+
+回归验证：`python3 tests/task_schedule_test.py`，在 QEMU PC/Q35 上通过实际 F7 操作
+检查 A/B 循环计数和三个任务的时钟计数持续推进，以及 TASKS 页面仍可操作。

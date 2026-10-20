@@ -109,7 +109,7 @@ typedef struct _TSS32 {
 
     WORD trap;          // +64h
     WORD iomap_base;    // +66h
-} TSS32;
+} TSS32, *PTSS32;
 
 _Static_assert(sizeof(TSS32) == 104, "TSS32 size");
 
@@ -141,6 +141,7 @@ typedef struct _TASK {
     WORD reserved;      // +3ah
 
     TSS32 tss;          // +3ch
+    volatile DWORD work_count; /* Demo progress, independent of scheduler ticks. */
 } TASK, *PTASK;
 
 void seg_xlat(PSMP_SEG dest, PSEG_DESC src);

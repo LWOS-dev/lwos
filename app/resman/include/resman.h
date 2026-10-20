@@ -3,6 +3,7 @@
 
 #include "../../../lib/include/resman.h"
 #include "lwp.h"
+#include "task.h"
 
 #define RM_MAX_IMAGES 32u
 
@@ -10,7 +11,8 @@ enum {
     RM_IMAGE_FREE = 0,
     RM_IMAGE_LOADING = 1,
     RM_IMAGE_LOADED = 2,
-    RM_IMAGE_RUNNING = 3
+    RM_IMAGE_RUNNING = 3,
+    RM_IMAGE_BOUND = 4
 };
 
 struct _RM_IMAGE {
@@ -32,14 +34,18 @@ DWORD resman_version(void);
 PVOID resman_alloc(DWORD size, DWORD align, DWORD tag);
 int resman_free(PVOID p);
 
+int resman_image_acquire(PRM_IMAGE *out);
 int resman_image_load(PCVOID file, DWORD file_size, WORD owner, PRM_IMAGE *out);
 int resman_image_run(PRM_IMAGE image, PCLW_ENV env, int *exit_code);
 int resman_image_unload(PRM_IMAGE image);
+int resman_image_valid(PRM_IMAGE pimg);
 
 void resman_alarm(void);
 void resman_pcspk(int hz);
 void resman_pcspk_shut(void);
 
 void* resman_task_table(void);
+int resman_task_acquire(PTASK *out);
+int resman_task_create(PRM_IMAGE image, PCLW_ENV env, PDWORD out_id);
 
 #endif

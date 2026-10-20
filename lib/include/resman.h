@@ -33,15 +33,18 @@ enum {
     LW_RM_SLOT_VERSION = 0x06,
     LW_RM_SLOT_ALLOC = 0x10,
     LW_RM_SLOT_FREE = 0x11,
-    LW_RM_SLOT_IMAGE_LOAD = 0x40,
-    LW_RM_SLOT_IMAGE_RUN = 0x41,
-    LW_RM_SLOT_IMAGE_UNLOAD = 0x42,
+    LW_RM_SLOT_IMAGE_ACQUIRE = 0x40,
+    LW_RM_SLOT_IMAGE_LOAD = 0x41,
+    LW_RM_SLOT_IMAGE_RUN = 0x42,
+    LW_RM_SLOT_IMAGE_UNLOAD = 0x43,
     LW_RM_SLOT_ALARM = 0x50,
     LW_RM_SLOT_ALARM_FREQ = 0x51,
     LW_RM_SLOT_ALARM_SHUT = 0x52,
     LW_RM_SLOT_TASK_TABLE = 0x53,
     LW_RM_SLOT_TASK_CURRENT = 0x54,
-    LW_RM_SLOT_COUNT = 0x55
+    LW_RM_SLOT_TASK_ACQUIRE = 0x55,
+    LW_RM_SLOT_TASK_CREATE = 0x56,
+    LW_RM_SLOT_COUNT
 };
 
 typedef struct _LW_ENV {
@@ -67,6 +70,7 @@ int rm_attach(PVOID base);
 #define rm_image_load           RM_CALL(LW_RM_SLOT_IMAGE_LOAD,      int (*)(PCVOID, DWORD, WORD, PRM_IMAGE *))
 #define rm_image_run            RM_CALL(LW_RM_SLOT_IMAGE_RUN,       int (*)(PRM_IMAGE, PCLW_ENV, int *))
 #define rm_image_unload         RM_CALL(LW_RM_SLOT_IMAGE_UNLOAD,    int (*)(PRM_IMAGE))
+#define rm_task_create          RM_CALL(LW_RM_SLOT_TASK_CREATE,     int (*)(PRM_IMAGE, PCLW_ENV, PDWORD))
 #define rm_alarm                RM_CALL(LW_RM_SLOT_ALARM,           void (*)(void))
 
 #endif

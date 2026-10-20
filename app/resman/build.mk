@@ -5,6 +5,7 @@ RM_BIN := $(BIN_DIR)/resman.bin
 RM_OBJS := $(BUILD_DIR)/$(RM_DIR)/head.o \
            $(BUILD_DIR)/$(RM_DIR)/resman.o \
            $(BUILD_DIR)/$(RM_DIR)/task.o \
+           $(BUILD_DIR)/$(RM_DIR)/task_start.o \
 		   $(BUILD_DIR)/$(RM_DIR)/image.o \
            $(BUILD_DIR)/$(RM_DIR)/imgcall.o \
            $(BUILD_DIR)/$(RM_DIR)/tui.o \

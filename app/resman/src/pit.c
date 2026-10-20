@@ -2,6 +2,7 @@
 #include "abi.h"
 #include "../include/resman.h"
 #include "../include/pit.h"
+#include "../include/task.h"
 
 int pit_set_frequency(BYTE channel, DWORD hz) {
     DWORD divisor;
@@ -48,7 +49,10 @@ int pcspk_play(DWORD hz) {
 void timer_irq(PISR_FRAME frame) {
     (void)frame;
     
+    if (current_task)current_task->run_ticks++;
+    /* EOI before switching, so the next task can receive IRQ0. */
     lw_outb(0x20,0x20);
+    task_schedule();
 }
 static DWORD lock(void) {
     DWORD flags;
