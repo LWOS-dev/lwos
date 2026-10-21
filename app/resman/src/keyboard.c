@@ -1,6 +1,7 @@
 #include "../include/keyboard.h"
 #include "../include/task.h"
 #include "abi.h"
+#include "mouse.h"
 
 #define QUEUE_SIZE 128u
 #define WAIT_LIMIT 100000u
@@ -12,6 +13,48 @@ volatile BYTE kb_last_sc;
 volatile DWORD kb_dropped;
 
 DWORD keyboard_owner=0;
+static int input_enabled, moved;
+static RM_MOUSE_POS position;
+static int max_x, max_y;
+static BYTE buttons;
+static int mouse_keys[QUEUE_SIZE];
+static DWORD mouse_head, mouse_tail;
+
+/* All mouse state and queue access is protected by IF=0. */
+static void mouse_receive(void)
+{
+    MOUSE_EVENT event;
+    mouse_poll();
+    while (mouse_read(&event)) {
+        position.x += event.dx;
+        position.y -= event.dy;
+        if (position.x < 0) position.x = 0;
+        if (position.y < 0) position.y = 0;
+        if (position.x > max_x) position.x = max_x;
+        if (position.y > max_y) position.y = max_y;
+        if (event.dx || event.dy) moved = 1;
+        BYTE changed = buttons ^ event.buttons;
+        for (unsigned i=0; i<3; i++) {
+            if (!(changed & (1u<<i))) continue;
+            DWORD next=(mouse_head+1)&(QUEUE_SIZE-1);
+            if (next==mouse_tail) mouse_tail=(mouse_tail+1)&(QUEUE_SIZE-1);
+            mouse_keys[mouse_head]=(VK_LBUTTON+(int)i) |
+                ((event.buttons & (1u<<i)) ? 0 : VK_KEYUP);
+            mouse_head=next;
+        }
+        buttons=event.buttons;
+        if (moved || mouse_head!=mouse_tail)
+            task_wake_locked(keyboard_owner,TASK_WAIT_KEYBOARD);
+    }
+}
+
+static void mouse_irq(PISR_FRAME frame)
+{
+    (void)frame;
+    mouse_receive();
+    lw_outb(0xa0,0x20);
+    lw_outb(0x20,0x20);
+}
 
 static DWORD lock(void)
 {
@@ -50,6 +93,7 @@ void kb_irq(PISR_FRAME frame)
             enqueue(scan);
         }
     }
+    if (input_enabled) mouse_receive();
     lw_outb(0x20,0x20);
 }
 
@@ -97,6 +141,7 @@ static int send_acknowledged(BYTE byte)
         lw_outb(0x60,byte);
         for (tries=0; tries<WAIT_LIMIT; tries++) {
             BYTE status=lw_inb(0x64);
+            if (input_enabled && (status&0x21)==0x21) mouse_receive();
             if ((status&0x21)!=1)continue;
             BYTE reply=lw_inb(0x60);
             if (status&0xc0)continue;
@@ -155,6 +200,13 @@ void resman_keyboard_task_gone(DWORD id)
 {
     DWORD flags = lock();
     if (keyboard_owner == id) {
+        if (input_enabled) {
+            pic_irq_set(12,0);
+            mouse_shutdown();
+            input_enabled=0;
+        }
+        mouse_tail=mouse_head;
+        moved=buttons=0;
         keyboard_owner = 0;
         /* Drop keys intended for the old UI. Wake monitor even without data:
          * its boot wait is for ownership, not for a key to consume. */
@@ -172,4 +224,68 @@ void resman_keyboard_wait_monitor(void)
             task_block_locked(TASK_WAIT_KEYBOARD);
     }
     unlock(flags);
+}
+
+
+int resman_enable_input(void)
+{
+    DWORD flags=lock();
+    if (input_enabled) { unlock(flags); return RM_OK; }
+    DWORD width=lw_get_fb_w(), height=lw_get_fb_h();
+    if (!width || !height || width>0x7fffffff || height>0x7fffffff) {
+        unlock(flags);
+        return RM_ERR_NOT_READY;
+    }
+    if (resman_isr_set_handler(0x2c,mouse_irq) || mouse_init() || mouse_enable_irq()) {
+        mouse_shutdown();
+        unlock(flags);
+        return RM_ERR_NOT_READY;
+    }
+    max_x=(int)width-1; max_y=(int)height-1;
+    position.x=(int)width/2; position.y=(int)height/2;
+    mouse_head=mouse_tail=0;
+    buttons=0; moved=0;
+    input_enabled=1;
+    pic_irq_set(12,1);
+    unlock(flags);
+    return RM_OK;
+}
+
+void resman_input_wait(void)
+{
+    DWORD flags=lock();
+    if ((flags&0x200) && current_task) {
+        while (current_task->id!=keyboard_owner ||
+               (head==tail && mouse_head==mouse_tail && !moved))
+            task_block_locked(TASK_WAIT_KEYBOARD);
+    }
+    unlock(flags);
+}
+
+int resman_getmpoll(void)
+{
+    DWORD flags=lock();
+    int key=VK_NONE;
+    if (current_task && current_task->id==keyboard_owner) {
+        if (mouse_head!=mouse_tail) {
+            key=mouse_keys[mouse_tail];
+            mouse_tail=(mouse_tail+1)&(QUEUE_SIZE-1);
+        } else key=(int)lw_getp();
+    }
+    unlock(flags);
+    return key;
+}
+
+int resman_getmpos(RM_MOUSE_POS *pos)
+{
+    DWORD flags=lock();
+    int rc=RM_ERR_NOT_READY;
+    if (!pos) rc=RM_ERR_ARGUMENT;
+    else if (input_enabled && current_task && current_task->id==keyboard_owner) {
+        *pos=position;
+        moved=0;
+        rc=RM_OK;
+    }
+    unlock(flags);
+    return rc;
 }

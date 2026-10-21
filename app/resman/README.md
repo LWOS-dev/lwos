@@ -4,7 +4,7 @@
 monitor 启动时调用 RESMAN：首次清 BSS，初始化内存页分配器、GDT、
 任务 0 TSS、IDT、idle 和键盘/PIT，再自动装载 `/GHOST.EXE`。
 resman 主入口仍沿用 monitor 的栈；ghost 使用独立任务栈。
-图形由 ghost 持有；共享 gfx/ui/mouse 库继续保留供应用使用。
+图形由 ghost 持有；共享 gfx/ui 库继续保留供应用使用，鼠标由 resman 通过 IRQ12 接管。
 
 ## GHOST 自动启动
 
@@ -137,3 +137,12 @@ gcc -std=gnu11 -Wall -Wextra -Werror -Wno-pointer-to-int-cast -Wno-int-to-pointe
 释放记录后任务 ID 才可复用。F4 程序运行在任务 0，需显式 rm_free，返回不自动回收。
 `make test-alloc` 检查底层页分配；`python3 tests/task_schedule_test.py` 检查真实
 QEMU 多任务分配、IF 恢复和退出/终止后的回收。
+
+输入 ABI：ghost 创建成功后 resman 调用 `resman_enable_input()`，应用也可用
+`rm_enable_input()` 幂等启用。鼠标初始化失败仍保留键盘输入。
+`rm_getmpoll()` 非阻塞返回键盘 VK 或 `VK_LBUTTON` / `VK_RBUTTON` /
+`VK_MBUTTON`；鼠标释放带 `VK_KEYUP`，空队列为 `VK_NONE`。
+`RM_MOUSE_POS pos; rm_getmpos(&pos)` 获取左上角为原点的像素坐标，并确认移动消息。
+每轮应取完按键、读取位置，然后调用 `rm_input_wait()`；检查和阻塞在关中断
+区间内完成，避免丢失唤醒。输入仅允许当前键盘所有者读取。
+ghost 退出时关闭鼠标，清空事件，把输入交回 monitor。

@@ -1,5 +1,6 @@
 #include "../include/resman.h"
 #include "../include/task.h"
+#include "../include/keyboard.h"
 
 extern char __bss_start[], __bss_end[];
 
@@ -8,6 +9,10 @@ extern char __bss_start[], __bss_end[];
  */
 const PVOID lw_rm[LW_RM_SLOT_COUNT]
     __attribute__((section(".rmtab"), used, aligned(16))) = {
+    [LW_RM_SLOT_ENABLE_INPUT] = (PVOID)resman_enable_input,
+    [LW_RM_SLOT_INPUT_WAIT] = (PVOID)resman_input_wait,
+    [LW_RM_SLOT_GETMPOLL] = (PVOID)resman_getmpoll,
+    [LW_RM_SLOT_GETMPOS] = (PVOID)resman_getmpos,
     [LW_RM_SLOT_MAGIC] = (PVOID)LW_RM_MAGIC,
     [LW_RM_SLOT_ENTRY] = (PVOID)resman_main,
     [LW_RM_SLOT_BSS_START] = (PVOID)__bss_start,

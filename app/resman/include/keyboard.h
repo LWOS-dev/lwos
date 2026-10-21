@@ -1,6 +1,11 @@
 #ifndef _LW_RM_KEYBOARD_H
 #define _LW_RM_KEYBOARD_H
 #include "isr.h"
+#include "../../../lib/include/resman.h"
+int resman_enable_input(void);
+void resman_input_wait(void);
+int resman_getmpoll(void);
+int resman_getmpos(RM_MOUSE_POS *pos);
 extern volatile DWORD kb_irq_cnt;
 extern volatile BYTE kb_last_sc;
 extern volatile DWORD kb_dropped;

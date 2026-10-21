@@ -27,7 +27,7 @@ int lwp_main(const LW_ENV *env) {
         width>0x1fffffffu || pitch<width*4 ||
         pitch>0x7ffff000u/height)
         return RM_ERR_NOT_READY;
-    DWORD buffer_size=pitch*height;
+    DWORD buffer_size=pitch*height; // k right use actual buffer size
     backbuffer=rm_alloc(buffer_size,4,0);
     framebuffer=(PVOID)lw_get_fb();
     memzero(text,100);
@@ -51,11 +51,20 @@ int lwp_main(const LW_ENV *env) {
     set_bb(backbuffer);
     set_info(width,height,32,pitch);
 
-    while (1) {
-        if ((int)lw_getp()==0x1b)break; /* Esc returns to monitor. */
-        putpixel(123,123,0xff0000);
+    RM_MOUSE_POS pos = {(int)width/2, (int)height/2};
+    int running=1;
+    DWORD color=0xff0000;
+    while (running) {
+        int key;
+        while ((key=rm_getmpoll())!=VK_NONE) {
+            if (key==VK_ESC) running=0;
+            if (key==VK_LBUTTON) color=0x00ff00;
+            if (key==(VK_LBUTTON|VK_KEYUP)) color=0xff0000;
+        }
+        rm_getmpos(&pos);
+        putpixel(pos.x,pos.y,color);
         gfx_update();
-        asm volatile("hlt" ::: "memory");
+        if (running) rm_input_wait();
     }
 
     lw_gfx_exit();

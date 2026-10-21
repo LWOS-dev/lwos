@@ -96,16 +96,33 @@ def check(machine, scenario):
                 qmp('qmp_capabilities')
                 if scenario == 'normal':
                     wait_for(lambda: word(RM['keyboard_owner']) == 1 and state(0) == 4)
-                    wait_for(lambda: state(1) in (2, 3))
+                    wait_for(lambda: state(1) == 4)
                     assert memory(RM['task'] + 168 + 8, 10) == b'GHOST.EXE\0'
                     base = word(RM['task'] + 168 + 28)
 
                     def red_pixel():
                         fb = word(base + GHOST['fb'])
                         pitch = word(base + GHOST['pitch'])
-                        return fb and pitch and word(fb + 123 * pitch + 123 * 4) == 0xff0000
+                        x, y = word(RM["position"]), word(RM["position"]+4)
+                        return fb and pitch and word(fb + y * pitch + x * 4) == 0xff0000
 
                     wait_for(red_pixel)
+                    x, y = word(RM['position']), word(RM['position']+4)
+                    qmp('input-send-event', {'events': [
+                        {'type':'rel', 'data':{'axis':'x', 'value':20}},
+                        {'type':'rel', 'data':{'axis':'y', 'value':10}}]})
+                    wait_for(lambda: word(RM['position']) == x+20 and
+                             word(RM['position']+4) == y+10)
+                    wait_for(red_pixel)
+                    wait_for(lambda: state(1) == 4)
+                    qmp('input-send-event', {'events': [
+                        {'type':'btn', 'data':{'button':'left', 'down':True}}]})
+                    wait_for(lambda: word(word(base+GHOST['fb']) +
+                             (y+10)*word(base+GHOST['pitch'])+(x+20)*4) == 0x00ff00)
+                    qmp('input-send-event', {'events': [
+                        {'type':'btn', 'data':{'button':'left', 'down':False}}]})
+                    wait_for(red_pixel)
+                    wait_for(lambda: state(1) == 4)
                     key('a')
                     assert state(0) == 4, 'monitor consumed GUI input'
                     assert word(RM['keyboard_owner']) == 1

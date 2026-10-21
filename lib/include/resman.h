@@ -2,6 +2,7 @@
 #define _LW_RESMAN_H
 
 #include "stdint.h"
+#include "keys.h"
 
 #define LW_RM_BASE 0x00180000u
 #define LW_RM_LIMIT 0x00200000u
@@ -48,6 +49,10 @@ enum {
     LW_RM_SLOT_TASK_EXIT = 0x57,
     LW_RM_SLOT_TASK_KILL = 0x58,
     LW_RM_SLOT_TASK_REAP = 0x59,
+    LW_RM_SLOT_ENABLE_INPUT = 0x60,
+    LW_RM_SLOT_INPUT_WAIT,
+    LW_RM_SLOT_GETMPOLL,
+    LW_RM_SLOT_GETMPOS,
     LW_RM_SLOT_COUNT
 };
 
@@ -62,6 +67,18 @@ typedef const LW_ENV *PCLW_ENV;
 typedef int (*LWP_ENTRY)(PCLW_ENV env);
 
 typedef struct _RM_IMAGE RM_IMAGE, *PRM_IMAGE;
+
+typedef struct _RM_MOUSE_POS { int x, y; } RM_MOUSE_POS;
+/* Input belongs to the keyboard owner. Poll returns VK_NONE when empty,
+ * keyboard codes or mouse VK_*BUTTON (release: VK_KEYUP | button).
+ * Position is in pixels, origin top-left, clamped to framebuffer bounds.
+ * getmpos acknowledges pending movement; drain poll and read position before
+ * waiting. wait atomically sleeps until keyboard, buttons or movement arrive.
+ * Enable is idempotent, returns RM_OK or RM_ERR_NOT_READY. */
+#define rm_enable_input RM_CALL(LW_RM_SLOT_ENABLE_INPUT, int (*)(void))
+#define rm_input_wait RM_CALL(LW_RM_SLOT_INPUT_WAIT, void (*)(void))
+#define rm_getmpoll RM_CALL(LW_RM_SLOT_GETMPOLL, int (*)(void))
+#define rm_getmpos RM_CALL(LW_RM_SLOT_GETMPOS, int (*)(RM_MOUSE_POS *))
 
 extern PVOID *rm_base;
 

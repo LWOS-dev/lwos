@@ -35,7 +35,9 @@ int resman_main(PVOID *abi)
         if (resman_pit_init())return RM_ERR_NOT_READY;
         initialized = 1;
         /* Failure is nonfatal: retain monitor input and its text UI. */
-        resman_autoload_ghost();
+
+        if (resman_autoload_ghost()==RM_OK && resman_enable_input()!=RM_OK)
+            lw_puts("MOUSE INPUT UNAVAILABLE\n\r");
     }
 
     lw_setcur(0);

@@ -68,6 +68,7 @@ int main(void)
     int n = 0;
     while (mouse_read(&event)) n++;
     assert(n == 31 && event.dx == 39);
+    assert(mouse_enable_irq() == 0 && config == 0x43);
     mouse_shutdown(); assert(config == 0x61);
     assert(mouse_init() == 0);
     assert(!mouse_read(&event));

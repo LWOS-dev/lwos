@@ -12,6 +12,7 @@ typedef struct _MOUSE_EVENT {
  * Initialize after monitor enables the keyboard, with keyboard polling paused.
  */
 int mouse_init(void);
+int mouse_enable_irq(void); /* after init, with CPU IRQs masked */
 void mouse_shutdown(void);
 void mouse_poll(void); /* bounded, leaves keyboard bytes unread */
 int mouse_read(MOUSE_EVENT *event); /* 1 = event, 0 = empty */

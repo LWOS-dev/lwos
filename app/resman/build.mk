@@ -17,8 +17,8 @@ RM_OBJS := $(BUILD_DIR)/$(RM_DIR)/head.o \
 		   $(BUILD_DIR)/$(RM_DIR)/pit.o \
            $(BUILD_DIR)/$(RM_DIR)/double_fault.o
 # resman 显式选择自己的库，使用 lib/build.mk 的 KERN 编译规则。
-# 初始化内存页分配器和 GDT；图形、UI、鼠标由应用按需链接。
-RM_LIB_SRCS := mem.c \
+# 初始化内存页分配器和 GDT；鼠标由 resman 接管，图形、UI 由应用按需链接。
+RM_LIB_SRCS := mouse.c mem.c \
                fs.c \
                bitmap.c \
                task.c \

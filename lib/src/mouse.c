@@ -82,6 +82,11 @@ int mouse_init(void)
     active = 1;
     return 0;
 }
+int mouse_enable_irq(void)
+{
+    if (!active) return -1;
+    return config_write((saved_config & (BYTE)~0x20) | 2);
+}
 void mouse_shutdown(void)
 {
     if (!active) return;
