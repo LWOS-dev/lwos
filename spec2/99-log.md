@@ -4,6 +4,12 @@
 
 ---
 
+## 2026-10-21  文本窗口 / stdio 需求定稿
+
+- 做到：新增 [61](61-text-console-stdio.md)，明确 TEXT flag → resman 字符缓冲区 → env → GHOST 绘制 → CRT/printf 的目标链路；同步 EXE、GUI、索引和路线。此次仅更新规格，未实现运行时代码。
+- 下一步：C0，TEXTDEMO 直接写 80×25 字符缓冲区，由 GHOST 绘制窗口。
+- 坑：TEXT 已定义为 0x10；任务回收不能释放仍被窗口读取的文本对象；Hello World 正常退出后须保留输出。
+
 ## 2026-10-13  IRQ 键盘 / ABI 后端
 
 - 做到：IRQ1 收扫描码进环形队列，原 ABI getk/getc/getp 绑定此来源；空闲 HLT、LED ACK 与扫描码分离、ABI 再 attach 保留后端。make、宿主解码和 QEMU PC/Q35 键盘回归通过。

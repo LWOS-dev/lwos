@@ -64,8 +64,6 @@ int resman_image_load(PCVOID file, DWORD file_size, WORD owner, PRM_IMAGE *out) 
         }
     }
 
-    //pimg=image_acquire();
-    //if (!pimg)return -11;
     int err=resman_image_acquire(&pimg);
     if (err)return -11;
 

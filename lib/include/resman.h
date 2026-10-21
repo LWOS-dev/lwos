@@ -56,12 +56,41 @@ enum {
     LW_RM_SLOT_COUNT
 };
 
+typedef struct _LW_BUF_WIN {
+    DWORD canva_w;
+    DWORD canva_h;
+    DWORD pitch;
+    DWORD format;
+    PVOID buffer;
+} LW_BUF_WIN, *PLW_BUF_WIN;
+typedef struct _LW_BUF_TXT {
+    DWORD cols;
+    DWORD lines;
+    PVOID buffer;
+} LW_BUF_TXT, *PLW_BUF_TXT;
+
+enum {
+    LW_VI_LEGACY=0,
+    LW_VI_NONE,
+    LW_VI_TEXT,
+    LW_VI_GFX
+};
+
+typedef struct _LW_VI {
+    DWORD size;
+    DWORD mode;
+    DWORD window_id;
+    PLW_BUF_WIN win;
+    PLW_BUF_TXT txt;
+} LW_VI, *PLW_VI;
+
 typedef struct _LW_ENV {
     DWORD version, size;
     PVOID *abi;
     PVOID *rm;
     int argc;
     char **argv;
+    LW_VI vi; // visible
 } LW_ENV, *PLW_ENV;
 typedef const LW_ENV *PCLW_ENV;
 typedef int (*LWP_ENTRY)(PCLW_ENV env);

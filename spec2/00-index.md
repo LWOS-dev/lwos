@@ -34,6 +34,7 @@
 | 50 | [50-resman-memory.md](50-resman-memory.md) | resman：内存资源管理 |
 | 51 | [51-tasks.md](51-tasks.md) | 基于 GDT/TSS 的任务切换（无分页） |
 | 60 | [60-gui.md](60-gui.md) | 图形界面路线 |
+| 61 | [61-text-console-stdio.md](61-text-console-stdio.md) | GHOST 文本窗口、共享字符缓冲区、CRT 与 stdio Hello World |
 | 90 | [90-roadmap.md](90-roadmap.md) | **总路线**：交错推进的阶段划分，以及每次停下时怎么留笔记 |
 | 99 | [99-log.md](99-log.md) | 开发日志：每次停下时追加一条"做到 / 下一步 / 坑" |
 

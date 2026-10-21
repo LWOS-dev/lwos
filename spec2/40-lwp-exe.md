@@ -38,7 +38,7 @@
 +00   DWORD  magic         'LWP\0' = 0x0050574C
 +04   WORD   version       1
 +06   WORD   hdr_size      头的字节数，以后加字段就变大
-+08   DWORD  flags         bit0 DLL；bit1 用了 FPU（APP 层编译）；bit2 无重定位（固定地址）
++08   DWORD  flags         bit0 DLL；bit1 用了 FPU（APP 层编译）；bit2 无重定位（固定地址）；bit3 NWIN；bit4 TEXT；bit5 GFX
 +0C   DWORD  abi_need      需要的 ABI 最小 slot 数（见下）
 +10   DWORD  entry         入口 RVA（相对映像开头）
 +14   DWORD  image_off     映像在文件里的偏移
@@ -57,6 +57,9 @@
 **`abi_need` 怎么定**：ABI 的 slot 只追加，所以"ABI 有多少个 slot"本身就是版本号。
 建议在 ABI 表里加一个 slot 返回 `LW_SLOT_COUNT`。mkexe 把编译时的 `LW_SLOT_COUNT` 写进 `abi_need`，
 加载器发现运行中的 ABI 比它小就拒绝加载。resman 表同理（以后头里再加一个 `rm_need`）。
+
+TEXT/NWIN/GFX 的互斥规则、文本资源准备和普通 main 的 CRT 启动链见
+[61 文本窗口与标准输出](61-text-console-stdio.md)。TEXT 使用现有 `LWP_FLAG_TEXT = 0x10`。
 
 ### 重定位表
 
@@ -84,6 +87,7 @@ typedef struct {
     PVOID *rm;           /* resman 表 */
     int    argc;
     char **argv;
+    LW_VI  vi;           /* 可视资源，定义见 lib/include/resman.h */
 } LW_ENV;
 
 int lwp_main(const LW_ENV *env);
@@ -98,7 +102,8 @@ int lwp_main(const LW_ENV *env);
 2. `rm_alloc(mem_size, 16, 所有者)`。
 3. 拷贝映像，把 `[image_size, mem_size)` 清零（bss）。
 4. 打重定位。
-5. 分配栈（`stack_size`）。
+5. 分配栈（`stack_size`）。对于 TEXT 程序，在入口执行前准备文本对象、窗口记录及 `env->vi`；
+   失败须完整回滚，生命周期见 [61](61-text-console-stdio.md)。
 6. 单任务阶段：切到新栈，直接 `call` 入口；返回后切回，释放内存。
    任务阶段：创建任务（见 [51](51-tasks.md)）。
 

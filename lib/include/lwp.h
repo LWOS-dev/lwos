@@ -14,6 +14,9 @@
 #define LWP_FLAG_FPU    0x02u
 /* v1 工具暂不支持固定地址映像, 没有存放加载基址的字段。 */
 #define LWP_FLAG_FIXED  0x04u
+#define LWP_FLAG_NWIN   0x08u
+#define LWP_FLAG_TEXT   0x10u
+#define LWP_FLAG_GFX    0x20u
 
 typedef struct _LWP_HDR {
     DWORD magic;
