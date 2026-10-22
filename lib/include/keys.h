@@ -1,6 +1,7 @@
 #ifndef _LM_KEYS
 #define _LM_KEYS
 
+#define VK_BKSPACE  0x08
 #define VK_TAB      0x09
 #define VK_ENTER    0x0a
 #define VK_ESC      0x1b

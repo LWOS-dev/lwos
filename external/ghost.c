@@ -8,15 +8,15 @@
 PVOID *lw_abi_base;
 PVOID *rm_base;
 static GUI_DISPLAY display;
-static GUI_TEXT_WINDOW demo_window={16,48,0};
-static DWORD demo_id;
+static GUI_TEXT_WINDOW ccp_window={16,48,0};
+static DWORD ccp_id;
 static DWORD focus_window;
 static RM_TEXT_SNAPSHOT snapshot;
 /* Focus is a GHOST policy. There is no stacking order yet. */
 static int update_window(void) {
-    if (demo_id) {
+    if (ccp_id) {
         for (DWORD slot=0;slot<32;slot++) {
-            if (rm_text_snapshot(slot,&snapshot)==RM_OK && snapshot.task_id==demo_id) {
+            if (rm_text_snapshot(slot,&snapshot)==RM_OK && snapshot.task_id==ccp_id) {
                 if (snapshot.task_state==TASK_DEAD)focus_window=0;
                 return 1;
             }
@@ -37,16 +37,16 @@ static void set_focus(DWORD window) {
 }
 
 static void close_demo(void) {
-    if (!demo_id)return;
+    if (!ccp_id)return;
     set_focus(0);
     int code;
-    rm_task_kill(demo_id); /* DEAD is already safe to reap. */
-    if (rm_task_reap(demo_id,&code)==RM_OK)demo_id=0;
+    rm_task_kill(ccp_id); /* DEAD is already safe to reap. */
+    if (rm_task_reap(ccp_id,&code)==RM_OK)ccp_id=0;
 }
 static void draw_demo(void) {
     if (!update_window())return;
-    demo_window.caption=snapshot.caption;
-    gui_draw_text_window(&demo_window,&snapshot,focus_window==snapshot.window_id);
+    ccp_window.caption=snapshot.caption;
+    gui_draw_text_window(&ccp_window,&snapshot,focus_window==snapshot.window_id);
 }
 
 __attribute__((section(".text.start")))
@@ -69,6 +69,7 @@ int lwp_main(const LW_ENV *env) {
     rectp_alloc(&mouse_rect);
     int running=1;
     int pointer_pressed=0;
+    lw_app_launch(lw_blk_get(0),"/CCP.EXE",0,&ccp_id);
     while (running) {
         int key;
         update_window();
@@ -76,7 +77,7 @@ int lwp_main(const LW_ENV *env) {
             if (key==VK_LBUTTON) {
                 rm_getmpos(&pos);
                 int inside=update_window() && snapshot.task_state!=TASK_DEAD &&
-                    gui_text_window_contains(&demo_window,pos.x,pos.y);
+                    gui_text_window_contains(&ccp_window,pos.x,pos.y);
                 set_focus(inside ? snapshot.window_id : 0);
             }
             if (key>=0 && key<VK_LBUTTON && focus_window) {
@@ -85,7 +86,7 @@ int lwp_main(const LW_ENV *env) {
                 if (rc)gui_draw_error("Window input unavailable");
                 continue;
             }
-            if (key==VK_ESC) running=0;
+            if (key==VK_ESC) running=0;/*
             if (key=='t' || key=='T') {
                 int rc=demo_id ? RM_ERR_NOT_READY :
                     lw_app_launch(lw_blk_get(0),"/CCP.EXE",0,&demo_id);
@@ -95,8 +96,8 @@ int lwp_main(const LW_ENV *env) {
             }
             if (key=='c' || key=='C') {
                 close_demo();
-                gui_erase_text_window(&demo_window);
-            }
+                gui_erase_text_window(&ccp_window);
+            }*/
             if (key==VK_LBUTTON) pointer_pressed=1;
             if (key==(VK_LBUTTON|VK_KEYUP)) pointer_pressed=0;
         }
@@ -105,7 +106,7 @@ int lwp_main(const LW_ENV *env) {
         gui_draw_pointer(pos.x,pos.y,pointer_pressed,&display);
         gui_present(&display);
         if (running) {
-            if (demo_id)asm volatile("sti; hlt":::"memory");
+            if (ccp_id)asm volatile("sti; hlt":::"memory");
             else rm_input_wait();
         }
     }

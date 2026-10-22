@@ -86,6 +86,7 @@ $(FSROOT)/MEMLOOP.EXE: $(BIN_DIR)/external/memloop.exe
 # Programs defining main() get a private CRT/stdout and the TEXT image flag.
 TEXT_PROGRAMS := textdemo hello ccp
 TEXT_ELFS := $(addprefix $(BIN_DIR)/external/,$(addsuffix .elf,$(TEXT_PROGRAMS)))
+$(BIN_DIR)/external/ccp.elf: $(BUILD_DIR)/lib/app/string.o
 TEXT_EXES := $(TEXT_ELFS:.elf=.exe)
 $(TEXT_ELFS): $(BIN_DIR)/external/%.elf: $(BUILD_DIR)/external/%.o $(CRT_OBJS) $(STDIO_LIB_OBJS) tools/mkexe/lwp.ld external/build.mk
 	@mkdir -p $(@D)
