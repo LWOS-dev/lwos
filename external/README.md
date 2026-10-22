@@ -165,7 +165,7 @@ int rc = lw_app_launch(lw_blk_get(0), "/TEXTDEMO.EXE", 0, &task_id);
 - **Esc**（桌面焦点）：先清理示例，再退出 GHOST 返回 monitor。
 - 单击窗口获得焦点，单击桌面取消焦点；标题栏颜色显示焦点状态。
 
-`textdemo.c` 通过 `env->vi.txt->buffer` 写入字符/颜色，等待窗口事件并回显输入，Enter 返回 42。
+`textdemo.c` 使用 `main()`、`printf()` 和 `console.h` 写入字符/颜色，等待窗口事件并回显输入，Enter 返回 42。
 标题显示十六进制退出码 `0000002A`；内容保留到关闭窗口。
 它不调用分配器或绘图接口，也不接触 framebuffer。构建通过 `mkexe --text` 设置 `flags=0x10`。
 
@@ -175,7 +175,7 @@ resman 加载时分配字符缓冲区，创建任务时注入环境；GHOST 定�
 无 GUI host 时 TEXT 加载被拒绝，F4 同步执行 TEXT 暂不支持；旧程序 flags=0 保持原行为。
 
 首版只管理一个示例窗口，保留 DEAD 任务及其映像直到关闭，不支持提前 reap 后继续保留窗口。
-CRT/main/stdio、stdin 行编辑、拖动、多窗口和 Z 序属于后续阶段。
+CRT/main/stdio 已实现；stdin 行编辑、拖动、多窗口界面和 Z 序属于后续阶段。
 `python3 tests/text_window_test.py` 在 QEMU PC/Q35 对比完整客户区的字形/颜色，
 检查焦点切换、按键隔离、等待/唤醒、退出码、窗口代次、反复关闭后的内存位图和冲突 flags 的失败回滚。
 截图输出到 `build/text-window.ppm`。
@@ -252,3 +252,74 @@ PIT 时钟 1193182 Hz，分频 1194，一个 tick 约 1.000686 ms。
 `python3 tests/sleep_test.py` 在临时镜像上验证阻塞、idle、键盘不唤醒定时等待、
 禁中断/越界参数、sleep(0) 及 tick 回绕，并以 PIT 校准 TSC，打印 1/5/10 ms
 请求各 32 次采样的最小和最大延迟。测试结果是 QEMU TCG 测量，不代表真机上界。
+
+
+## 窗口 caption
+
+窗口标题字段统一为 `caption`。`lw_app_launch`、monitor 文件执行和启动加载在
+创建任务前，将程序路径复制到映像的 caption；例如 `/TEXTDEMO.EXE`。
+GHOST 从 `RM_TEXT_SNAPSHOT.caption` 读取，GUI 库通过 `GUI_TEXT_WINDOW.caption`
+绘制，不再写死示例名称。已退出窗口保留最后一次 caption，直到关闭/reap。
+
+应用初始化 `rm_base = env->rm` 后，可修改自己的窗口：
+
+```c
+rm_window_set_caption(env->vi.window_id, "My application");
+```
+
+系统保存字符串副本，调用后可以释放或改写原缓冲区。最多 255 字节加结尾 NUL；
+允许空标题，NULL 或过长字符串被拒绝且保留原标题。标题栏按可用宽度裁剪显示。
+只能修改属于当前任务的活窗口，其他窗口、过期 ID、已退出窗口均被拒绝。
+加载器可在 `rm_task_create` 前用 `rm_image_set_caption(image, path)` 设置默认值。
+caption 扩展快照使用追加的 ABI 槽位，旧快照槽位仍只写原有 4016 字节。
+
+TEXTDEMO 启动默认显示路径，获得焦点后按 **F2** 将 caption 改成
+`TEXTDEMO - custom caption`；Enter 退出后保留该标题。
+`make test-app-launch test-window-event test-tui-execute` 覆盖复制、权限、长度和失败清理，
+`python3 tests/text_window_test.py` 验证默认/修改后标题的实际像素及生命周期。
+
+
+## main、printf 与每个程序的光标
+
+`lib/src/vsprintf.c` 从 `../../lwos/v1b5/kernel/vsprintf.c` 的整数格式化逻辑迁移，
+改用正确的 32 位变参类型，并修复旧 `snprintf` 未限制写入容量的问题。
+`stdio.c` 提供文本后端，`crt0.c` 提供 `lwp_main` 入口；应用只需：
+
+```c
+#include <stdio.h>
+
+int main(void) {
+    printf("Hello, world!\n");
+    return 0;
+}
+```
+
+将程序名加入 `external/build.mk` 的 `EXTERNAL_NAMES` 和 `TEXT_PROGRAMS`，
+再登记 `FSROOT_FILES` 及对应来源，即会链接 CRT/stdio 并用 `mkexe --text` 打包。
+`HELLO.EXE` 是最小示例；GHOST 的 T 键仍加载交互示例 `TEXTDEMO.EXE`。
+通过 `lw_app_launch` 加载 HELLO 时也需要已注册的文本 host。
+
+CRT 启动时绑定 `env->vi.txt`，每个 EXE 自己的 BSS 保存 stdout、光标和颜色。
+此后 `printf` 不需传窗口 ID，也不使用当前焦点判断输出位置。
+焦点仅控制输入；同一个 EXE 启动两次也有独立状态。此约定不是地址空间保护。
+`main` 可接收 argc/argv；需要窗口事件或 caption 时包含 `crt.h`，从 `lw_env` 获取环境。
+不要同时自行定义 `lwp_main`、`rm_base` 或 `lw_abi_base`。
+保留自定义入口的程序可只链接 `STDIO_LIB_OBJS`，自行调用一次 `stdio_init(env)`。
+
+`console.h` 提供 `stdio_set_cursor(x, y)`、`stdio_get_cursor(&x, &y)` 和
+`stdio_set_attr(attr)`；坐标从 0 开始。这是输出位置的逻辑光标，尚未绘制闪烁光标。
+输出无缓冲，支持换行、回车、8 列制表、退格移动、自动折行和滚屏；退格不擦除字符。
+任务返回后，输出与 caption 保留到窗口关闭。
+
+支持 `printf/vprintf`、`fprintf/vfprintf`（仅 stdout）、`putchar/fputc`、
+`puts/fputs`、`sprintf/vsprintf`、`snprintf/vsnprintf`。
+格式支持 `d/i/u/x/X/o/p/c/s/%%`、`-+ #0`、固定或 `*` 宽度/精度，
+整数长度支持 `hh/h/l/ll`；目标机 `%p` 输出 `0x` 加八位十六进制。
+不支持浮点、`%n`、宽字符、stdin 或文件流；不支持/不完整的格式返回 EOF，
+可能已输出此前合法的前缀。`snprintf` 返回完整所需长度，容量非零时保留结尾 NUL，
+允许 `snprintf(NULL, 0, ...)`；`sprintf` 要求调用者确保容量足够。
+格式化直接流式输出，没有旧版 printk 的全局 1024 字节临时缓冲区。
+
+验证：`make test-stdio` 检查格式化、截断、控制字符、滚屏与独立状态（ASan/UBSan）；
+`python3 tests/stdio_test.py` 在 QEMU PC/Q35 启动两份 TEXTDEMO 及 HELLO，
+检查真实 32 位变参、独立输出/光标、CRT 返回值和任务回收。

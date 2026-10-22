@@ -53,6 +53,9 @@ int resman_autoload_ghost(void)
     kfree(buffer);
     buffer = 0;
 
+    rc = resman_image_set_caption(image, "/GHOST.EXE");
+    if (rc) goto done;
+
     /* No task may run between publication of READY and input handoff. */
     DWORD flags = mem_irq_save();
     stage = "TASK";

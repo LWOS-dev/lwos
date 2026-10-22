@@ -1,5 +1,5 @@
 # 外部程序: 每个 .c 对应一个可重定位 LWP EXE, 只通过公开 ABI 调用系统。
-EXTERNAL_NAMES = textdemo memtest memloop a b exit ghost reddot \
+EXTERNAL_NAMES = hello textdemo memtest memloop a b exit ghost reddot \
 				 shader \
 				 xtal \
 				 calc
@@ -81,8 +81,18 @@ FSROOT_FILES += $(FSROOT)/MEMTEST.EXE $(FSROOT)/MEMLOOP.EXE
 $(FSROOT)/MEMTEST.EXE: $(BIN_DIR)/external/memtest.exe
 $(FSROOT)/MEMLOOP.EXE: $(BIN_DIR)/external/memloop.exe
 
-$(BIN_DIR)/external/textdemo.exe: $(BIN_DIR)/external/textdemo.elf $(EXTERNAL_MKEXE)
+# Programs defining main() get a private CRT/stdout and the TEXT image flag.
+TEXT_PROGRAMS := textdemo hello
+TEXT_ELFS := $(addprefix $(BIN_DIR)/external/,$(addsuffix .elf,$(TEXT_PROGRAMS)))
+TEXT_EXES := $(TEXT_ELFS:.elf=.exe)
+$(TEXT_ELFS): $(BIN_DIR)/external/%.elf: $(BUILD_DIR)/external/%.o $(CRT_OBJS) $(STDIO_LIB_OBJS) tools/mkexe/lwp.ld external/build.mk
+	@mkdir -p $(@D)
+	$(TOOL_LD) $(LDFLAGS) --emit-relocs -T tools/mkexe/lwp.ld $(filter %.o,$^) $(LIBGCC) -o $@
+$(TEXT_EXES): $(BIN_DIR)/external/%.exe: $(BIN_DIR)/external/%.elf $(EXTERNAL_MKEXE)
 	$(EXTERNAL_MKEXE) --text $< $@
+
+FSROOT_FILES += $(FSROOT)/HELLO.EXE
+$(FSROOT)/HELLO.EXE: $(BIN_DIR)/external/hello.exe
 
 FSROOT_FILES += $(FSROOT)/TEXTDEMO.EXE
 $(FSROOT)/TEXTDEMO.EXE: $(BIN_DIR)/external/textdemo.exe

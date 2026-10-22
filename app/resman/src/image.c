@@ -28,7 +28,7 @@ int resman_text_host(int enable) {
     mem_irq_restore(flags);
     return rc;
 }
-int resman_text_snapshot(DWORD slot, RM_TEXT_SNAPSHOT *out) {
+static int text_snapshot(DWORD slot, RM_TEXT_SNAPSHOT *out, int caption) {
     if (!out || slot>=RM_MAX_IMAGES)return RM_ERR_ARGUMENT;
     DWORD flags=mem_irq_save();
     PRM_IMAGE img=&images[slot];
@@ -40,10 +40,19 @@ int resman_text_snapshot(DWORD slot, RM_TEXT_SNAPSHOT *out) {
         out->task_state=task[img->text_task].state;
         out->exit_code=task[img->text_task].exit_code;
         memcpy(out->cells,img->text.buffer,sizeof(out->cells));
+        if (caption)memcpy(out->caption,img->caption,sizeof(out->caption));
         rc=RM_OK;
     }
     mem_irq_restore(flags);
     return rc;
+}
+
+/* Keep the old slot's 4016-byte write size for already-built GUI hosts. */
+int resman_text_snapshot(DWORD slot, RM_TEXT_SNAPSHOT *out) {
+    return text_snapshot(slot,out,0);
+}
+int resman_text_snapshot_caption(DWORD slot, RM_TEXT_SNAPSHOT *out) {
+    return text_snapshot(slot,out,1);
 }
 
 int resman_image_acquire(PRM_IMAGE *out) {
@@ -311,6 +320,35 @@ int resman_window_wait(DWORD window) {
             task_block_locked(TASK_WAIT_WINDOW);
         rc=RM_OK;
     }
+    mem_irq_restore(flags);
+    return rc;
+}
+
+
+static int copy_caption(PCHAR destination, PCSTR caption) {
+    if (!caption)return RM_ERR_ARGUMENT;
+    DWORD length=0;
+    while (length<LW_WINDOW_CAPTION_SIZE && caption[length])length++;
+    if (length==LW_WINDOW_CAPTION_SIZE)return RM_ERR_ARGUMENT;
+    /* Validate first, then copy, so rejection leaves the old value intact. */
+    memcpy(destination,caption,length+1);
+    for (DWORD i=length+1;i<LW_WINDOW_CAPTION_SIZE;i++)destination[i]=0;
+    return RM_OK;
+}
+int resman_image_set_caption(PRM_IMAGE image, PCSTR caption) {
+    DWORD flags=mem_irq_save();
+    int rc=RM_ERR_ARGUMENT;
+    if (resman_image_valid(image) && image->state==RM_IMAGE_LOADED)
+        rc=copy_caption(image->caption,caption);
+    mem_irq_restore(flags);
+    return rc;
+}
+int resman_window_set_caption(DWORD window, PCSTR caption) {
+    DWORD flags=mem_irq_save();
+    PRM_IMAGE image=window_find(window);
+    int rc=RM_ERR_NOT_READY;
+    if (current_task && image && current_task->id==image->text_task)
+        rc=copy_caption(image->caption,caption);
     mem_irq_restore(flags);
     return rc;
 }

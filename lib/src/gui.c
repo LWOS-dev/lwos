@@ -75,10 +75,10 @@ void gui_draw_text_window(const GUI_TEXT_WINDOW *window,
     draw_rect(&r,0xaaaaaa);
     draw_rectr(client_x,title_y,LW_TEXT_COLS*CELL_W,TITLE_H,title_color);
     /* Keep long titles inside the title bar and leave room for exit status. */
-    if (window->title) {
+    if (window->caption) {
         int limit=snapshot->task_state==TASK_DEAD ? 64 : 79;
-        for (int i=0;i<limit && window->title[i];i++)
-            putc_xy(client_x+4+i*CELL_W,title_y+2,(BYTE)window->title[i],
+        for (int i=0;i<limit && window->caption[i];i++)
+            putc_xy(client_x+4+i*CELL_W,title_y+2,(BYTE)window->caption[i],
                 0xffffff,title_color);
     }
     if (snapshot->task_state==TASK_DEAD) {

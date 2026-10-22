@@ -26,6 +26,7 @@ struct _RM_IMAGE {
     DWORD window_id, text_task;
     LW_WINDOW_EVENT events[LW_WINDOW_QUEUE_SIZE];
     DWORD event_head, event_tail;
+    CHAR caption[LW_WINDOW_CAPTION_SIZE];
 };
 
 extern const PVOID lw_rm[LW_RM_SLOT_COUNT];
@@ -46,6 +47,9 @@ void resman_text_task_gone(DWORD id);
 int resman_text_host(int enable);
 int resman_text_available(void);
 int resman_text_snapshot(DWORD slot, RM_TEXT_SNAPSHOT *out);
+int resman_text_snapshot_caption(DWORD slot, RM_TEXT_SNAPSHOT *out);
+int resman_image_set_caption(PRM_IMAGE image, PCSTR caption);
+int resman_window_set_caption(DWORD window, PCSTR caption);
 
 int resman_window_send(DWORD window, const LW_WINDOW_EVENT *event);
 int resman_window_poll(DWORD window, LW_WINDOW_EVENT *event);

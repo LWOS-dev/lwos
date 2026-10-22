@@ -476,6 +476,8 @@ static void fe_launch(const char *path, int background) {
     if (err)goto cleanup;
     kfree(buffer);
     buffer=0; /* RESMAN owns a separate copy of the executable. */
+    err=rm_image_set_caption(image,path);
+    if (err)goto cleanup;
 
     if (background) {
         DWORD id;

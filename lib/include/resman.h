@@ -61,6 +61,9 @@ enum {
     LW_RM_SLOT_WINDOW_WAIT,
     LW_RM_SLOT_SLEEP,
     LW_RM_SLOT_UPTIME_MS,
+    LW_RM_SLOT_IMAGE_SET_CAPTION,
+    LW_RM_SLOT_WINDOW_SET_CAPTION,
+    LW_RM_SLOT_TEXT_SNAPSHOT_CAPTION,
     LW_RM_SLOT_COUNT
 };
 
@@ -99,6 +102,7 @@ typedef struct _RM_TEXT_SNAPSHOT {
     DWORD window_id, task_id, task_state;
     int exit_code;
     WORD cells[LW_TEXT_COLS * LW_TEXT_LINES];
+    CHAR caption[LW_WINDOW_CAPTION_SIZE];
 } RM_TEXT_SNAPSHOT;
 
 typedef struct _LW_ENV {
@@ -154,9 +158,11 @@ int rm_attach(PVOID base);
 
 
 /* Host registration belongs to the calling task. Snapshot index is an image
- * slot (0..31); missing/non-text slots return RM_ERR_NOT_READY. */
+ * slot (0..31); missing/non-text slots return RM_ERR_NOT_READY.
+ * The caption snapshot uses a new slot; the legacy slot keeps its original
+ * 4016-byte layout for already-built callers. Rebuild to access caption. */
 #define rm_text_host RM_CALL(LW_RM_SLOT_TEXT_HOST, int (*)(int))
-#define rm_text_snapshot RM_CALL(LW_RM_SLOT_TEXT_SNAPSHOT, int (*)(DWORD, RM_TEXT_SNAPSHOT *))
+#define rm_text_snapshot RM_CALL(LW_RM_SLOT_TEXT_SNAPSHOT_CAPTION, int (*)(DWORD, RM_TEXT_SNAPSHOT *))
 
 /* Only the registered host may send to a live TEXT window. Window IDs are
  * generation IDs, not reusable task slots. Full queues return NOT_READY
@@ -177,5 +183,12 @@ int rm_attach(PVOID base);
 #define RM_SLEEP_MAX_MS 0x7ffffffdu
 #define rm_sleep RM_CALL(LW_RM_SLOT_SLEEP, int (*)(DWORD))
 #define rm_uptime_ms RM_CALL(LW_RM_SLOT_UPTIME_MS, DWORD (*)(void))
+
+/* Copy a NUL-terminated caption (0..255 bytes). NULL/overlong strings fail
+ * without changing the caption. Image setter: loaded, unbound images only;
+ * window setter: only the live window's owning task. No caller pointer is kept.
+ */
+#define rm_image_set_caption RM_CALL(LW_RM_SLOT_IMAGE_SET_CAPTION, int (*)(PRM_IMAGE, PCSTR))
+#define rm_window_set_caption RM_CALL(LW_RM_SLOT_WINDOW_SET_CAPTION, int (*)(DWORD, PCSTR))
 
 #endif

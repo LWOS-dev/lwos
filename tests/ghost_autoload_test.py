@@ -108,28 +108,28 @@ def check(machine, scenario):
                     assert memory(RM['task'] + 168 + 8, 10) == b'GHOST.EXE\0'
                     base = word(RM['task'] + 168 + 28)
 
-                    def red_pixel():
+                    def pointer_visible():
                         fb = word(base + GHOST['fb'])
                         pitch = word(base + GHOST['pitch'])
                         x, y = word(RM["position"]), word(RM["position"]+4)
-                        return fb and pitch and word(fb + y * pitch + x * 4) == 0xff0000
+                        return fb and pitch and word(fb+(y+1)*pitch+(x+1)*4)==0xffffff
 
-                    wait_for(red_pixel)
+                    wait_for(pointer_visible)
                     x, y = word(RM['position']), word(RM['position']+4)
                     qmp('input-send-event', {'events': [
                         {'type':'rel', 'data':{'axis':'x', 'value':20}},
                         {'type':'rel', 'data':{'axis':'y', 'value':10}}]})
                     wait_for(lambda: word(RM['position']) == x+20 and
                              word(RM['position']+4) == y+10)
-                    wait_for(red_pixel)
+                    wait_for(pointer_visible)
                     wait_for(lambda: state(1) == 4)
                     qmp('input-send-event', {'events': [
                         {'type':'btn', 'data':{'button':'left', 'down':True}}]})
-                    wait_for(lambda: word(word(base+GHOST['fb']) +
-                             (y+10)*word(base+GHOST['pitch'])+(x+20)*4) == 0x00ff00)
+                    wait_for(lambda: word(RM['buttons']) & 1)
                     qmp('input-send-event', {'events': [
                         {'type':'btn', 'data':{'button':'left', 'down':False}}]})
-                    wait_for(red_pixel)
+                    wait_for(pointer_visible)
+                    wait_for(lambda: not (word(RM['buttons']) & 1))
                     wait_for(lambda: state(1) == 4)
                     if scenario == 'text-conflict':
                         baseline = memory(0x300000, 0x20000)
@@ -149,6 +149,26 @@ def check(machine, scenario):
                             wait_for(lambda: word(focus) != 0 and word(snap+8) == 4)
                             window = word(focus)
                             assert window == word(snap)
+                            def caption():
+                                return memory(snap+4016,256).split(b'\0',1)[0]
+                            def caption_rendered(text, focused):
+                                font=(ROOT/'resource/vgafont.bin').read_bytes()
+                                expected=bytearray()
+                                background=0x80 if focused else 0x555555
+                                for gy in range(16):
+                                    for ch in text:
+                                        bits=font[ch*16+gy]
+                                        for gx in range(8):
+                                            expected.extend((0xffffff if bits&(128>>gx) else background).to_bytes(4,'little'))
+                                fb,pitch=word(base+GHOST['fb']),word(base+GHOST['pitch'])
+                                raw=memory(fb+54*pitch,16*pitch)
+                                actual=b''.join(raw[y*pitch+96:y*pitch+96+len(text)*32] for y in range(16))
+                                return actual==expected
+                            wait_for(lambda: caption()==b'/TEXTDEMO.EXE')
+                            wait_for(lambda: caption_rendered(b'/TEXTDEMO.EXE',True))
+                            key('f2')
+                            wait_for(lambda: caption()==b'TEXTDEMO - custom caption')
+                            wait_for(lambda: caption_rendered(b'TEXTDEMO - custom caption',True))
                             key('c')
                             key('t')
                             key('esc')
@@ -187,6 +207,8 @@ def check(machine, scenario):
                             window = word(snap)
                             assert window > previous_window
                             previous_window = window
+                            assert caption()==b'TEXTDEMO - custom caption'
+                            wait_for(lambda: caption_rendered(b'TEXTDEMO - custom caption',False))
                             cells = memory(snap+16, 4000)
                             assert cells[::2].startswith(b'HELLO FROM TEXTDEMO')
                             assert cells[24*160::2].startswith(b'80 columns x 25 lines.')

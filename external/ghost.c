@@ -45,8 +45,7 @@ static void close_demo(void) {
 }
 static void draw_demo(void) {
     if (!update_window())return;
-    demo_window.title=snapshot.task_state==TASK_DEAD ?
-        "TEXTDEMO.EXE - exited - C: close" : "TEXTDEMO.EXE - running - C: close";
+    demo_window.caption=snapshot.caption;
     gui_draw_text_window(&demo_window,&snapshot,focus_window==snapshot.window_id);
 }
 

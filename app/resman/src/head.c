@@ -10,6 +10,9 @@ extern char __bss_start[], __bss_end[];
  */
 const PVOID lw_rm[LW_RM_SLOT_COUNT]
     __attribute__((section(".rmtab"), used, aligned(16))) = {
+    [LW_RM_SLOT_IMAGE_SET_CAPTION] = (PVOID)resman_image_set_caption,
+    [LW_RM_SLOT_WINDOW_SET_CAPTION] = (PVOID)resman_window_set_caption,
+    [LW_RM_SLOT_TEXT_SNAPSHOT_CAPTION] = (PVOID)resman_text_snapshot_caption,
     [LW_RM_SLOT_SLEEP] = (PVOID)resman_sleep,
     [LW_RM_SLOT_UPTIME_MS] = (PVOID)resman_uptime_ms,
     [LW_RM_SLOT_WINDOW_SEND] = (PVOID)resman_window_send,

@@ -10,6 +10,8 @@
  * still require a registered text host. Files must be 1..1 MiB in size.
  * Returns RM_OK, an FS_* error, or an RM_* error (error ranges overlap).
  * On failure *task_id is zero and temporary resources are released.
+ * The program path is copied to image.caption before the task can run;
+ * paths over 255 bytes fail with RM_ERR_ARGUMENT.
  * On success the task owns its image; caller must eventually rm_task_reap
  * it, using rm_task_kill first if it is still running. No window is drawn.
  * task_id must point to an unused output variable, not a live task handle.

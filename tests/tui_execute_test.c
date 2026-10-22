@@ -39,6 +39,10 @@ static int load(PCVOID p,DWORD size,WORD owner,PRM_IMAGE *out) {
     *out=(PRM_IMAGE)1;
     return 0;
 }
+static int set_caption(PRM_IMAGE image, PCSTR caption) {
+    assert(image==(PRM_IMAGE)1 && strcmp(caption,"/APP.EXE")==0);
+    return RM_OK;
+}
 static int run(PRM_IMAGE img,PCLW_ENV env,int *code) {
     assert(img==(PRM_IMAGE)1 && !env && freed==ran+1);
     ran++;
@@ -68,6 +72,7 @@ static void setup(void) {
     abi_slots[LW_SLOT_IO_VIDEO_EXIT]=(PVOID)restore;
     abi_slots[LW_SLOT_CONSOLE_SET_CUR]=(PVOID)cursor;
     rm_slots[LW_RM_SLOT_IMAGE_LOAD]=(PVOID)load;
+    rm_slots[LW_RM_SLOT_IMAGE_SET_CAPTION]=(PVOID)set_caption;
     rm_slots[LW_RM_SLOT_IMAGE_RUN]=(PVOID)run;
     rm_slots[LW_RM_SLOT_IMAGE_UNLOAD]=(PVOID)unload;
 }

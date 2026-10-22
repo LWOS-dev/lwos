@@ -26,6 +26,8 @@ int lw_app_launch(PBLKDEV device, PCSTR path, PCLW_ENV env, PDWORD task_id) {
     if (count!=size) {rc=RM_ERR_FORMAT;goto done;}
     rc=rm_image_load(bytes,size,RM_OWNER_SYSTEM,&image);
     if (rc)goto done;
+    rc=rm_image_set_caption(image,path);
+    if (rc)goto done;
     rc=rm_task_create(image,env,&created_id);
     if (!rc) {
         *task_id=created_id;

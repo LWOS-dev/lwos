@@ -16,7 +16,7 @@ typedef struct _GUI_DISPLAY {
 
 typedef struct _GUI_TEXT_WINDOW {
     int x, y;
-    PCSTR title;
+    PCSTR caption;
 } GUI_TEXT_WINDOW;
 extern RTPCS mouse_rect;
 

@@ -32,3 +32,23 @@ test-app-launch: $(BUILD_DIR)/tests/app_launch_test
 .PHONY: test-app-launch
 
 $(BUILD_DIR)/lib/app/gui.o: resource/vgafont.h
+
+# Opt-in text runtime. Do not link CRT/stdout into monitor or legacy programs.
+STDIO_LIB_OBJS := $(addprefix $(BUILD_DIR)/lib/app/,vsprintf.o stdio.o)
+CRT_OBJS := $(BUILD_DIR)/lib/app/crt0.o
+
+STDIO_TEST_NAMES := vsnprintf snprintf vsprintf sprintf vfprintf fprintf vprintf printf \
+    fputc putchar fputs puts stdout stdio_init stdio_set_cursor stdio_get_cursor stdio_set_attr
+STDIO_TEST_FLAGS := -std=gnu11 -O1 -g -Wall -Wextra -Werror -fno-builtin \
+    -fsanitize=address,undefined $(LIB_INC)
+STDIO_TEST_DEFS := $(foreach name,$(STDIO_TEST_NAMES),-D$(name)=test_$(name))
+$(BUILD_DIR)/tests/stdio_second.o: lib/src/stdio.c lib/src/format.h $(wildcard lib/include/*.h)
+	@mkdir -p $(@D)
+	$(TOOL_C) $(STDIO_TEST_FLAGS) $(foreach name,$(STDIO_TEST_NAMES),-D$(name)=second_$(name)) -c $< -o $@
+$(BUILD_DIR)/tests/stdio_test: tests/stdio_test.c lib/src/stdio.c lib/src/vsprintf.c \
+    lib/src/format.h $(wildcard lib/include/*.h) $(BUILD_DIR)/tests/stdio_second.o
+	$(TOOL_C) $(STDIO_TEST_FLAGS) $(STDIO_TEST_DEFS) tests/stdio_test.c \
+	    lib/src/stdio.c lib/src/vsprintf.c $(BUILD_DIR)/tests/stdio_second.o -o $@
+test-stdio: $(BUILD_DIR)/tests/stdio_test
+	$<
+.PHONY: test-stdio
