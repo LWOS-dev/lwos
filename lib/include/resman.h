@@ -78,6 +78,7 @@ typedef struct _LW_BUF_TXT {
     DWORD cols;
     DWORD lines;
     PVOID buffer;
+    DWORD cursor; // cursor pos
 } LW_BUF_TXT, *PLW_BUF_TXT;
 
 enum {
@@ -103,6 +104,7 @@ typedef struct _RM_TEXT_SNAPSHOT {
     int exit_code;
     WORD cells[LW_TEXT_COLS * LW_TEXT_LINES];
     CHAR caption[LW_WINDOW_CAPTION_SIZE];
+    DWORD cursor;
 } RM_TEXT_SNAPSHOT;
 
 typedef struct _LW_ENV {

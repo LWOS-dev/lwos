@@ -62,7 +62,7 @@ int lwp_main(const LW_ENV *env) {
         gui_close(&display);
         return RM_ERR_NOT_READY;
     }
-    gui_draw_desktop("Desktop: T open / C close / Esc exit. Click window to focus.");
+    gui_draw_desktop_c();
     RM_MOUSE_POS pos = {(int)display.width/2, (int)display.height/2};
     mouse_rect.info.x=0,mouse_rect.info.y=0;
     mouse_rect.info.w=10,mouse_rect.info.h=10;
@@ -88,7 +88,7 @@ int lwp_main(const LW_ENV *env) {
             if (key==VK_ESC) running=0;
             if (key=='t' || key=='T') {
                 int rc=demo_id ? RM_ERR_NOT_READY :
-                    lw_app_launch(lw_blk_get(0),"/TEXTDEMO.EXE",0,&demo_id);
+                    lw_app_launch(lw_blk_get(0),"/CCP.EXE",0,&demo_id);
                 if (rc)gui_draw_error("TEXTDEMO launch failed");
                 else if (update_window() && snapshot.task_state!=TASK_DEAD)
                     set_focus(snapshot.window_id);

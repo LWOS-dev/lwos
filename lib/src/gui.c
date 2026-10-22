@@ -54,6 +54,9 @@ void gui_draw_desktop(PCSTR message) {
     gfx_fill(DESKTOP_COLOR);
     if (message)puts_xy(16,16,message,0xffffff,DESKTOP_COLOR);
 }
+void gui_draw_desktop_c(void) {
+    gfx_fill(DESKTOP_COLOR);
+}
 void gui_draw_error(PCSTR message) {
     if (message)puts_xy(16,32,message,0xff5555,DESKTOP_COLOR);
 }
@@ -90,8 +93,13 @@ void gui_draw_text_window(const GUI_TEXT_WINDOW *window,
         for (DWORD x=0;x<LW_TEXT_COLS;x++) {
             WORD cell=snapshot->cells[y*LW_TEXT_COLS+x];
             BYTE ch=(BYTE)cell;
-            putc_xy(client_x+x*CELL_W,client_y+y*CELL_H,ch<128?ch:'?',
-                palette[(cell>>8)&15],palette[(cell>>12)&15]);
+            if ((x+y*LW_TEXT_COLS)!=snapshot->cursor) {
+                putc_xy(client_x+x*CELL_W,client_y+y*CELL_H,ch<128?ch:'?',
+                    palette[(cell>>8)&15],palette[(cell>>12)&15]);
+            } else {
+                putc_xy(client_x+x*CELL_W,client_y+y*CELL_H,ch<128?ch:'?',
+                    palette[(cell>>12)&15],palette[(cell>>8)&15]);
+            }
         }
 }
 void gui_erase_text_window(const GUI_TEXT_WINDOW *window) {

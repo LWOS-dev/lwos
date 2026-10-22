@@ -23,6 +23,7 @@ extern RTPCS mouse_rect;
 int gui_open(GUI_DISPLAY *display);
 void gui_close(GUI_DISPLAY *display);
 void gui_draw_desktop(PCSTR message);
+void gui_draw_desktop_c(void);
 void gui_draw_error(PCSTR message);
 RECT gui_text_window_rect(const GUI_TEXT_WINDOW *window);
 int gui_text_window_contains(const GUI_TEXT_WINDOW *window, int x, int y);

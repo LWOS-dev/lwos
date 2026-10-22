@@ -24,12 +24,15 @@ int stdio_init(PCLW_ENV env) {
     console.text=text;
     console.window_id=env->vi.window_id;
     console.attr=0x07;
+    console.text = text;
+    text->cursor = 0;
     return RM_OK;
 }
 int stdio_set_cursor(DWORD x, DWORD y) {
     if (!console.text)return RM_ERR_NOT_READY;
     if (x>=console.text->cols || y>=console.text->lines)return RM_ERR_ARGUMENT;
     console.cursor_x=x;console.cursor_y=y;
+    console.text->cursor=x+y*console.text->cols;
     return RM_OK;
 }
 void stdio_get_cursor(PDWORD x, PDWORD y) {
@@ -66,6 +69,8 @@ int fputc(int ch, FILE *stream) {
         if (stream->cursor_x)stream->cursor_x--;
         else if (stream->cursor_y) {stream->cursor_y--;stream->cursor_x=stream->text->cols-1;}
     } else raw_char(stream,c);
+    stream->text->cursor =
+        stream->cursor_x + stream->cursor_y * stream->text->cols;
     return c;
 }
 int putchar(int ch) {return fputc(ch,stdout);}

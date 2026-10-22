@@ -2,7 +2,8 @@
 EXTERNAL_NAMES = hello textdemo memtest memloop a b exit ghost reddot \
 				 shader \
 				 xtal \
-				 calc
+				 calc \
+				 ccp
 EXTERNAL_EXES = $(addprefix $(BIN_DIR)/external/,$(addsuffix .exe,$(EXTERNAL_NAMES)))
 EXTERNAL_CFLAGS = $(CFLAGS_APP) -nostdinc -fno-pic \
     -fno-asynchronous-unwind-tables -fno-unwind-tables -Werror
@@ -59,6 +60,7 @@ FSROOT_FILES += $(FSROOT)/APP/CALC.EXE
 FSROOT_FILES += $(FSROOT)/A.EXE
 FSROOT_FILES += $(FSROOT)/B.EXE
 FSROOT_FILES += $(FSROOT)/GHOST.EXE
+FSROOT_FILES += $(FSROOT)/CCP.EXE
 
 $(FSROOT)/GFX/XTAL.EXE: $(BIN_DIR)/external/xtal.exe
 $(FSROOT)/GFX/SHADER.EXE: $(BIN_DIR)/external/shader.exe
@@ -82,7 +84,7 @@ $(FSROOT)/MEMTEST.EXE: $(BIN_DIR)/external/memtest.exe
 $(FSROOT)/MEMLOOP.EXE: $(BIN_DIR)/external/memloop.exe
 
 # Programs defining main() get a private CRT/stdout and the TEXT image flag.
-TEXT_PROGRAMS := textdemo hello
+TEXT_PROGRAMS := textdemo hello ccp
 TEXT_ELFS := $(addprefix $(BIN_DIR)/external/,$(addsuffix .elf,$(TEXT_PROGRAMS)))
 TEXT_EXES := $(TEXT_ELFS:.elf=.exe)
 $(TEXT_ELFS): $(BIN_DIR)/external/%.elf: $(BUILD_DIR)/external/%.o $(CRT_OBJS) $(STDIO_LIB_OBJS) tools/mkexe/lwp.ld external/build.mk
@@ -96,3 +98,6 @@ $(FSROOT)/HELLO.EXE: $(BIN_DIR)/external/hello.exe
 
 FSROOT_FILES += $(FSROOT)/TEXTDEMO.EXE
 $(FSROOT)/TEXTDEMO.EXE: $(BIN_DIR)/external/textdemo.exe
+
+FSROOT_FILES += $(FSROOT)/CCP.EXE
+$(FSROOT)/CCP.EXE: $(BIN_DIR)/external/ccp.exe

@@ -39,6 +39,7 @@ static int text_snapshot(DWORD slot, RM_TEXT_SNAPSHOT *out, int caption) {
         out->task_id=img->text_task;
         out->task_state=task[img->text_task].state;
         out->exit_code=task[img->text_task].exit_code;
+        out->cursor=img->text.cursor;
         memcpy(out->cells,img->text.buffer,sizeof(out->cells));
         if (caption)memcpy(out->caption,img->caption,sizeof(out->caption));
         rc=RM_OK;
