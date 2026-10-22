@@ -4,30 +4,17 @@
 #include "../include/pit.h"
 #include "../include/task.h"
 
-int pit_set_frequency(BYTE channel, DWORD hz) {
-    DWORD divisor;
-    WORD port;
-    BYTE command;
-
-    if (channel != PIT_CH0 && channel != PIT_CH2)return -1;
-    if (hz == 0)return -1;
-
-    divisor=(PIT_CLOCK+hz/2)/hz;
-
-    if (divisor<2 || divisor>65536)return -1;
-
-    port=0x40+channel;
-
-    if (channel == PIT_CH0)
-        command = 0x34; // Mode 2
-    else
-        command = 0xB6; // Mode 3
-
-    lw_outb(0x43, command);
-    lw_outb(port, (BYTE)divisor);
-    lw_outb(port, (BYTE)(divisor >> 8));
-
+static int pit_set_divisor(BYTE channel, DWORD divisor) {
+    if ((channel!=PIT_CH0 && channel!=PIT_CH2) || divisor<2 || divisor>65536)
+        return -1;
+    lw_outb(0x43,channel==PIT_CH0 ? 0x34 : 0xb6);
+    lw_outb(0x40+channel,(BYTE)divisor);
+    lw_outb(0x40+channel,(BYTE)(divisor>>8));
     return 0;
+}
+int pit_set_frequency(BYTE channel, DWORD hz) {
+    if (!hz || hz>PIT_CLOCK)return -1;
+    return pit_set_divisor(channel,(PIT_CLOCK+hz/2)/hz);
 }
 
 void pcspk_enable(void) {
@@ -44,15 +31,31 @@ int pcspk_play(DWORD hz) {
     return 0;
 }
 
-#define PIT_TICK_HZ 100u
+volatile DWORD timer_ticks;
+static volatile DWORD uptime_ms;
+static DWORD ms_fraction, quantum_ticks;
 
+DWORD resman_uptime_ms(void) {
+    return uptime_ms;
+}
 void timer_irq(PISR_FRAME frame) {
     (void)frame;
-    
+    timer_ticks++;
+    /* 1194/1193182 s = 1.00068556 ms. Accumulate the fractional ms without
+     * a 64-bit division/libgcc dependency in the kernel. Counter wraps at 2^32.
+     */
+    uptime_ms++;
+    ms_fraction+=PIT_TIMER_DIVISOR*1000u-PIT_CLOCK;
+    if (ms_fraction>=PIT_CLOCK) {ms_fraction-=PIT_CLOCK;uptime_ms++;}
     if (current_task)current_task->run_ticks++;
-    /* EOI before switching, so the next task can receive IRQ0. */
+    int woke=task_timer_tick(timer_ticks);
+    int preempt=++quantum_ticks>=10;
+    if (preempt)quantum_ticks=0;
+    /* EOI before switching, so the next task can receive IRQ0. Wake sleepers
+     * at the 1 ms timer rate, while ordinary preemption stays around 10 ms.
+     */
     lw_outb(0x20,0x20);
-    task_schedule();
+    if (woke || preempt)task_schedule();
 }
 static DWORD lock(void) {
     DWORD flags;
@@ -67,8 +70,8 @@ static void unlock(DWORD flags) {
 // 初始化定时器 IRQ0
 int resman_pit_init(void) {
     DWORD flags=lock();
-    /* 16 位分频器不能直接产生 1 Hz，使用软件计数分频。 */
-    if (pit_set_frequency(PIT_CH0,PIT_TICK_HZ)!=0) {
+    /* A ceil-rounded divisor gives a minimum tick period of 1 ms. */
+    if (pit_set_divisor(PIT_CH0,PIT_TIMER_DIVISOR)!=0) {
         unlock(flags);
         return -1;
     }

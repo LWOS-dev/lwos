@@ -1,8 +1,50 @@
 #include "../include/resman.h"
 #include "abi.h"
 #include "mem.h"
+#include "../include/task.h"
 
 RM_IMAGE images[RM_MAX_IMAGES];
+static DWORD text_host_id, next_window_id;
+
+void resman_text_task_gone(DWORD id) {
+    if (text_host_id==id)text_host_id=0;
+}
+int resman_text_available(void) {
+    return text_host_id && task[text_host_id].state != TASK_FREE &&
+        task[text_host_id].state != TASK_DEAD;
+}
+int resman_text_host(int enable) {
+    DWORD flags=mem_irq_save();
+    int rc=RM_ERR_NOT_READY;
+    if (current_task && current_task->id) {
+        if (enable && (!resman_text_available() || text_host_id==current_task->id)) {
+            text_host_id=current_task->id;
+            rc=RM_OK;
+        } else if (!enable && text_host_id==current_task->id) {
+            text_host_id=0;
+            rc=RM_OK;
+        }
+    }
+    mem_irq_restore(flags);
+    return rc;
+}
+int resman_text_snapshot(DWORD slot, RM_TEXT_SNAPSHOT *out) {
+    if (!out || slot>=RM_MAX_IMAGES)return RM_ERR_ARGUMENT;
+    DWORD flags=mem_irq_save();
+    PRM_IMAGE img=&images[slot];
+    int rc=RM_ERR_NOT_READY;
+    if (resman_text_available() && current_task->id==text_host_id &&
+        img->state==RM_IMAGE_BOUND && img->text.buffer) {
+        out->window_id=img->window_id;
+        out->task_id=img->text_task;
+        out->task_state=task[img->text_task].state;
+        out->exit_code=task[img->text_task].exit_code;
+        memcpy(out->cells,img->text.buffer,sizeof(out->cells));
+        rc=RM_OK;
+    }
+    mem_irq_restore(flags);
+    return rc;
+}
 
 int resman_image_acquire(PRM_IMAGE *out) {
     if (!out)return RM_ERR_ARGUMENT;
@@ -36,6 +78,11 @@ int resman_image_load(PCVOID file, DWORD file_size, WORD owner, PRM_IMAGE *out) 
     if (plhdr->magic != LWP_MAGIC)return -2;
     if (plhdr->version != LWP_VERSION)return -3;
     if (plhdr->hdr_size != LWP_HEADER_SIZE)return -4;
+    DWORD visual=plhdr->flags & (LWP_FLAG_NWIN|LWP_FLAG_TEXT|LWP_FLAG_GFX);
+    if (visual && (visual & (visual-1)))return RM_ERR_FORMAT;
+    if ((plhdr->flags & LWP_FLAG_DLL) && visual)return RM_ERR_FORMAT;
+    if (visual==LWP_FLAG_GFX)return RM_ERR_NOT_IMPLEMENTED;
+    if (visual==LWP_FLAG_TEXT && !resman_text_available())return RM_ERR_NOT_READY;
     if (plhdr->abi_need > LW_SLOT_COUNT)return RM_ERR_ABI;
     if (!plhdr->mem_size || plhdr->mem_size>0x7ffff000u ||
         plhdr->stack_size<32 || plhdr->stack_size>0x7ffff000u)
@@ -77,6 +124,21 @@ int resman_image_load(PCVOID file, DWORD file_size, WORD owner, PRM_IMAGE *out) 
         kfree(base);
         memzero(pimg,sizeof(*pimg));
         return RM_ERR_MEMORY;
+    }
+    if (visual==LWP_FLAG_TEXT) {
+        pimg->text.buffer=kmalloc(LW_TEXT_COLS*LW_TEXT_LINES*sizeof(WORD));
+        if (!pimg->text.buffer || pimg->text.buffer==(PVOID)-1 || pimg->text.buffer==(PVOID)-2) {
+            kfree(stack);
+            kfree(base);
+            memzero(pimg,sizeof(*pimg));
+            return RM_ERR_MEMORY;
+        }
+        pimg->text.cols=LW_TEXT_COLS;
+        pimg->text.lines=LW_TEXT_LINES;
+        for (DWORD i=0;i<LW_TEXT_COLS*LW_TEXT_LINES;i++)
+            ((PWORD)pimg->text.buffer)[i]=0x0720;
+        if (!++next_window_id)++next_window_id;
+        pimg->window_id=next_window_id;
     }
     memcpy(base,(PCBYTE)file+plhdr->image_off,plhdr->image_size);
     memzero((PBYTE)base+plhdr->image_size,plhdr->mem_size-plhdr->image_size);
@@ -133,6 +195,7 @@ int resman_image_run(PRM_IMAGE image, PCLW_ENV env, int* exit_code) {
     if (!image_handle_valid(image))return RM_ERR_ARGUMENT;
 
     if (image->state!=RM_IMAGE_LOADED)return RM_ERR_ARGUMENT;
+    if (image->flags & LWP_FLAG_TEXT)return RM_ERR_NOT_IMPLEMENTED;
     if (!image->base || !image->stack || !image->entry)return RM_ERR_ARGUMENT;
     if (env->version != LW_ENV_VERSION || 
         env->size < sizeof(LW_ENV))return RM_ERR_ARGUMENT;
@@ -159,6 +222,7 @@ int resman_image_run(PRM_IMAGE image, PCLW_ENV env, int* exit_code) {
 int resman_image_unload(PRM_IMAGE image) {
     if (!image_handle_valid(image))return RM_ERR_ARGUMENT;
     if (image->state!=RM_IMAGE_LOADED)return RM_ERR_ARGUMENT;
+    if (image->text.buffer)kfree(image->text.buffer);
     if (image->stack) {
         kfree(image->stack);
         image->stack=0;
@@ -183,3 +247,70 @@ struct _RM_IMAGE {
     WORD owner, state;
 };
 */
+
+/* The host chooses focus; resman only transports events to the window owner.
+ * All lookups and queue operations run with IRQs masked, including wait's
+ * empty-check/block sequence, so delivery cannot race a task going to sleep.
+ */
+static PRM_IMAGE window_find(DWORD window) {
+    if (!window)return 0;
+    for (DWORD i=0;i<RM_MAX_IMAGES;i++) {
+        PRM_IMAGE img=&images[i];
+        if (img->state==RM_IMAGE_BOUND && img->text.buffer &&
+            img->window_id==window && img->text_task<TASK_MAX) {
+            DWORD state=task[img->text_task].state;
+            if (state==TASK_READY || state==TASK_RUNNING || state==TASK_WAITING)
+                return img;
+        }
+    }
+    return 0;
+}
+int resman_window_send(DWORD window, const LW_WINDOW_EVENT *event) {
+    if (!event || (event->type!=LW_WINDOW_KEY && event->type!=LW_WINDOW_FOCUS) ||
+        (event->type==LW_WINDOW_FOCUS && event->value!=0 && event->value!=1) ||
+        (event->type==LW_WINDOW_KEY && (event->value<0 || event->value>=VK_LBUTTON)))
+        return RM_ERR_ARGUMENT;
+    DWORD flags=mem_irq_save();
+    int rc=RM_ERR_NOT_READY;
+    PRM_IMAGE img=window_find(window);
+    if (current_task && resman_text_available() &&
+        current_task->id==text_host_id && img) {
+        DWORD next=(img->event_head+1)%LW_WINDOW_QUEUE_SIZE;
+        if (next!=img->event_tail) {
+            img->events[img->event_head]=*event;
+            img->event_head=next;
+            task_wake_locked(img->text_task,TASK_WAIT_WINDOW);
+            rc=RM_OK;
+        }
+    }
+    mem_irq_restore(flags);
+    return rc;
+}
+int resman_window_poll(DWORD window, LW_WINDOW_EVENT *event) {
+    if (!event)return RM_ERR_ARGUMENT;
+    DWORD flags=mem_irq_save();
+    PRM_IMAGE img=window_find(window);
+    int rc=RM_ERR_NOT_READY;
+    if (current_task && img && current_task->id==img->text_task) {
+        rc=0;
+        if (img->event_head!=img->event_tail) {
+            *event=img->events[img->event_tail];
+            img->event_tail=(img->event_tail+1)%LW_WINDOW_QUEUE_SIZE;
+            rc=1;
+        }
+    }
+    mem_irq_restore(flags);
+    return rc;
+}
+int resman_window_wait(DWORD window) {
+    DWORD flags=mem_irq_save();
+    int rc=RM_ERR_NOT_READY;
+    PRM_IMAGE img=window_find(window);
+    if ((flags&0x200) && current_task && img && current_task->id==img->text_task) {
+        while (img->event_head==img->event_tail)
+            task_block_locked(TASK_WAIT_WINDOW);
+        rc=RM_OK;
+    }
+    mem_irq_restore(flags);
+    return rc;
+}

@@ -30,6 +30,14 @@ def check(machine, scenario):
             subprocess.run(['mcopy', '-o', '-i', partition, str(source),
                             '::/GHOST.EXE'], check=True)
 
+        if scenario == 'text-conflict':
+            source = work/'text-conflict.exe'
+            data = bytearray((ROOT/'bin/external/textdemo.exe').read_bytes())
+            data[8:12] = (0x18).to_bytes(4, 'little')
+            source.write_bytes(data)
+            subprocess.run(['mcopy', '-o', '-i', partition, str(source),
+                            '::/TEXTDEMO.EXE'], check=True)
+
         sock = work / 'qmp.sock'
         guest = subprocess.Popen([
             'qemu-system-i386', '-machine', machine, '-accel', 'tcg', '-m', '32',
@@ -94,7 +102,7 @@ def check(machine, scenario):
                     time.sleep(.15)
 
                 qmp('qmp_capabilities')
-                if scenario == 'normal':
+                if scenario in ('normal', 'text', 'text-conflict'):
                     wait_for(lambda: word(RM['keyboard_owner']) == 1 and state(0) == 4)
                     wait_for(lambda: state(1) == 4)
                     assert memory(RM['task'] + 168 + 8, 10) == b'GHOST.EXE\0'
@@ -123,12 +131,105 @@ def check(machine, scenario):
                         {'type':'btn', 'data':{'button':'left', 'down':False}}]})
                     wait_for(red_pixel)
                     wait_for(lambda: state(1) == 4)
+                    if scenario == 'text-conflict':
+                        baseline = memory(0x300000, 0x20000)
+                        key('t')
+                        wait_for(lambda: state(1) == 4)
+                        assert state(2) == 0, 'conflicting flags published a task'
+                        assert word(base+GHOST['demo_id']) == 0
+                        assert memory(0x300000,0x20000) == baseline, 'failed load leaked'
+                    if scenario == 'text':
+                        baseline = memory(0x300000, 0x20000)
+                        previous_window = 0
+                        for cycle in range(3):
+                            key('t')
+                            wait_for(lambda: state(2) == 4)
+                            snap = base + GHOST['snapshot']
+                            focus = base + GHOST['focus_window']
+                            wait_for(lambda: word(focus) != 0 and word(snap+8) == 4)
+                            window = word(focus)
+                            assert window == word(snap)
+                            key('c')
+                            key('t')
+                            key('esc')
+                            assert state(1) != 5 and state(2) == 4
+                            wait_for(lambda: memory(snap+16+3*160,4)[::2] == b'ct')
+
+                            def click(x, y):
+                                ox, oy = word(RM['position']), word(RM['position']+4)
+                                qmp('input-send-event', {'events': [
+                                    {'type':'rel', 'data':{'axis':'x', 'value':x-ox}},
+                                    {'type':'rel', 'data':{'axis':'y', 'value':y-oy}}]})
+                                wait_for(lambda: word(RM['position']) == x and
+                                         word(RM['position']+4) == y)
+                                qmp('input-send-event', {'events': [
+                                    {'type':'btn', 'data':{'button':'left', 'down':True}}]})
+                                time.sleep(.1)
+                                qmp('input-send-event', {'events': [
+                                    {'type':'btn', 'data':{'button':'left', 'down':False}}]})
+
+                            click(700, 500)
+                            wait_for(lambda: word(focus) == 0)
+                            wait_for(lambda: memory(snap+16+160,20)[::2] == b'UNFOCUSED ')
+                            key('a')
+                            assert memory(snap+16+3*160,6)[::2] == b'ct '
+                            click(650, 60)
+                            wait_for(lambda: word(focus) == window)
+                            wait_for(lambda: memory(snap+16+160,20)[::2] == b'FOCUSED   ')
+                            key('b')
+                            wait_for(lambda: memory(snap+16+3*160,6)[::2] == b'ctb')
+                            key('ret')
+                            wait_for(lambda: state(2) == 5)
+                            wait_for(lambda: word(focus) == 0)
+                            assert word(RM['task'] + 2*168 + 52) == 42
+                            snap = base + GHOST['snapshot']
+                            wait_for(lambda: word(snap+4) == 2 and word(snap+8) == 5)
+                            window = word(snap)
+                            assert window > previous_window
+                            previous_window = window
+                            cells = memory(snap+16, 4000)
+                            assert cells[::2].startswith(b'HELLO FROM TEXTDEMO')
+                            assert cells[24*160::2].startswith(b'80 columns x 25 lines.')
+                            # Compare the whole client area against the bundled font,
+                            # including the bottom row and all background colors.
+                            font = (ROOT/'resource/vgafont.bin').read_bytes()
+                            palette = [0,0xaa,0xaa00,0xaaaa,0xaa0000,0xaa00aa,
+                                       0xaa5500,0xaaaaaa,0x555555,0x5555ff,0x55ff55,
+                                       0x55ffff,0xff5555,0xff55ff,0xffff55,0xffffff]
+                            expected = bytearray()
+                            for row in range(25):
+                                for gy in range(16):
+                                    for col in range(80):
+                                        char, attr = cells[(row*80+col)*2:(row*80+col)*2+2]
+                                        bits = font[char*16+gy]
+                                        for gx in range(8):
+                                            color = palette[(attr&15) if bits&(128>>gx) else (attr>>4)]
+                                            expected.extend(color.to_bytes(4, 'little'))
+                            def rendered():
+                                fb, pitch = word(base+GHOST['fb']), word(base+GHOST['pitch'])
+                                raw = memory(fb+72*pitch, 400*pitch)
+                                actual = b''.join(raw[y*pitch+80:y*pitch+80+2560] for y in range(400))
+                                return actual == expected
+                            wait_for(rendered)
+                            if cycle == 0:
+                                qmp('screendump', {'filename': str(ROOT/'build/text-window.ppm')})
+                            key('c')
+                            wait_for(lambda: state(2) == 0 and state(1) == 4)
+                            assert memory(0x300000,0x20000) == baseline, 'text lifecycle leak'
+                        # Host exit also closes a retained child window.
+                        key('t')
+                        wait_for(lambda: state(2) == 4)
+                        # Unfocus without closing: host exit must kill/reap a waiter.
+                        click(700, 500)
+                        wait_for(lambda: word(focus) == 0)
                     key('a')
                     assert state(0) == 4, 'monitor consumed GUI input'
                     assert word(RM['keyboard_owner']) == 1
                     key('esc')
                     wait_for(lambda: state(1) == 5 and word(RM['keyboard_owner']) == 0)
                     assert word(RM['task'] + 168 + 52) == 0
+                    if scenario == 'text':
+                        assert state(2) == 0, 'host exit leaked child'
                 elif scenario == 'return':
                     wait_for(lambda: state(1) == 5)
                     assert word(RM['task'] + 168 + 52) == 42

@@ -3,6 +3,7 @@
 
 #include "stdint.h"
 #include "keys.h"
+#include "window.h"
 
 #define LW_RM_BASE 0x00180000u
 #define LW_RM_LIMIT 0x00200000u
@@ -53,6 +54,13 @@ enum {
     LW_RM_SLOT_INPUT_WAIT,
     LW_RM_SLOT_GETMPOLL,
     LW_RM_SLOT_GETMPOS,
+    LW_RM_SLOT_TEXT_HOST,
+    LW_RM_SLOT_TEXT_SNAPSHOT,
+    LW_RM_SLOT_WINDOW_SEND,
+    LW_RM_SLOT_WINDOW_POLL,
+    LW_RM_SLOT_WINDOW_WAIT,
+    LW_RM_SLOT_SLEEP,
+    LW_RM_SLOT_UPTIME_MS,
     LW_RM_SLOT_COUNT
 };
 
@@ -83,6 +91,15 @@ typedef struct _LW_VI {
     PLW_BUF_WIN win;
     PLW_BUF_TXT txt;
 } LW_VI, *PLW_VI;
+
+/* C0: copied under the resman lock; no borrowed pointers escape to GHOST. */
+#define LW_TEXT_COLS 80u
+#define LW_TEXT_LINES 25u
+typedef struct _RM_TEXT_SNAPSHOT {
+    DWORD window_id, task_id, task_state;
+    int exit_code;
+    WORD cells[LW_TEXT_COLS * LW_TEXT_LINES];
+} RM_TEXT_SNAPSHOT;
 
 typedef struct _LW_ENV {
     DWORD version, size;
@@ -120,6 +137,7 @@ int rm_attach(PVOID base);
  * free(NULL) succeeds; otherwise only an owned, live allocation base is valid.
  * Background allocations are collected at task reap. F4 shares task 0 and
  * must explicitly free its allocations. These checks do not isolate memory. */
+// rm_alloc(int size, int ailgn, int tag)
 #define rm_alloc                RM_CALL(LW_RM_SLOT_ALLOC,           PVOID (*)(DWORD, DWORD, DWORD))
 #define rm_free                 RM_CALL(LW_RM_SLOT_FREE,            int (*)(PVOID))
 #define rm_image_load           RM_CALL(LW_RM_SLOT_IMAGE_LOAD,      int (*)(PCVOID, DWORD, WORD, PRM_IMAGE *))
@@ -133,5 +151,31 @@ int rm_attach(PVOID base);
 #define rm_task_kill            RM_CALL(LW_RM_SLOT_TASK_KILL,       int (*)(DWORD))
 #define rm_task_reap            RM_CALL(LW_RM_SLOT_TASK_REAP,       int (*)(DWORD, int *))
 #define rm_alarm                RM_CALL(LW_RM_SLOT_ALARM,           void (*)(void))
+
+
+/* Host registration belongs to the calling task. Snapshot index is an image
+ * slot (0..31); missing/non-text slots return RM_ERR_NOT_READY. */
+#define rm_text_host RM_CALL(LW_RM_SLOT_TEXT_HOST, int (*)(int))
+#define rm_text_snapshot RM_CALL(LW_RM_SLOT_TEXT_SNAPSHOT, int (*)(DWORD, RM_TEXT_SNAPSHOT *))
+
+/* Only the registered host may send to a live TEXT window. Window IDs are
+ * generation IDs, not reusable task slots. Full queues return NOT_READY
+ * without overwriting earlier events. No focus policy is kept in resman.
+ * poll: 1 event, 0 empty, negative RM_* error; caller owns the window.
+ * wait: atomically sleep until that caller's window has an event.
+ */
+#define rm_window_send RM_CALL(LW_RM_SLOT_WINDOW_SEND, int (*)(DWORD, const LW_WINDOW_EVENT *))
+#define rm_window_poll RM_CALL(LW_RM_SLOT_WINDOW_POLL, int (*)(DWORD, LW_WINDOW_EVENT *))
+#define rm_window_wait RM_CALL(LW_RM_SLOT_WINDOW_WAIT, int (*)(DWORD))
+
+/* Blocking millisecond sleep; 0 yields. Requires a running task and IF=1.
+ * Positive sleeps never intentionally return early, but scheduling/IRQ delays
+ * can make them longer. A phase guard adds up to one timer tick (about 1 ms).
+ * Maximum is under half the 32-bit tick range for wrap-safe deadlines.
+ * uptime_ms wraps after ~49.7 days; subtract unsigned values for intervals.
+ */
+#define RM_SLEEP_MAX_MS 0x7ffffffdu
+#define rm_sleep RM_CALL(LW_RM_SLOT_SLEEP, int (*)(DWORD))
+#define rm_uptime_ms RM_CALL(LW_RM_SLOT_UPTIME_MS, DWORD (*)(void))
 
 #endif

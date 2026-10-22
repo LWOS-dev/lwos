@@ -1,5 +1,5 @@
 # 外部程序: 每个 .c 对应一个可重定位 LWP EXE, 只通过公开 ABI 调用系统。
-EXTERNAL_NAMES = memtest memloop a b exit ghost reddot \
+EXTERNAL_NAMES = textdemo memtest memloop a b exit ghost reddot \
 				 shader \
 				 xtal \
 				 calc
@@ -38,7 +38,7 @@ test-xtal: $(BUILD_DIR)/tests/xtal_test
 
 # GUI host 单独链接图形/UI 工具库；其他外部程序仍使用单对象链接规则。
 GHOST_LIB_OBJS := $(addprefix $(BUILD_DIR)/lib/app/, \
-    gfx.o ui.o mem.o bitmap.o convert.o string.o)
+    gfx.o gui.o ui.o mem.o bitmap.o convert.o string.o fs.o app.o)
 
 $(BIN_DIR)/external/ghost.elf: $(BUILD_DIR)/external/ghost.o $(GHOST_LIB_OBJS) tools/mkexe/lwp.ld external/build.mk
 	@mkdir -p $(@D)
@@ -80,3 +80,9 @@ $(BUILD_DIR)/external/memtest.o $(BUILD_DIR)/external/memloop.o: external/memche
 FSROOT_FILES += $(FSROOT)/MEMTEST.EXE $(FSROOT)/MEMLOOP.EXE
 $(FSROOT)/MEMTEST.EXE: $(BIN_DIR)/external/memtest.exe
 $(FSROOT)/MEMLOOP.EXE: $(BIN_DIR)/external/memloop.exe
+
+$(BIN_DIR)/external/textdemo.exe: $(BIN_DIR)/external/textdemo.elf $(EXTERNAL_MKEXE)
+	$(EXTERNAL_MKEXE) --text $< $@
+
+FSROOT_FILES += $(FSROOT)/TEXTDEMO.EXE
+$(FSROOT)/TEXTDEMO.EXE: $(BIN_DIR)/external/textdemo.exe

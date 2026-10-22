@@ -343,13 +343,15 @@ typedef struct {
     uint32_t length;
 } SFTE; // simplified file table entries
 
-int fat_read_fte(int index, SFTE* p) {
+uint32_t next_cluster(uint32_t cluster);
+
+int fat_read_fte(uint32_t directory_cluster, int index, SFTE* p) {
     char display_name[12];
-    disk_read_checked(cluster_to_lba(root_cluster+index/16), 1, (uint16_p)fat_buf);
+    disk_read_checked(cluster_to_lba(directory_cluster), 1, (uint16_p)fat_buf);
 
     memcpy(p->name, fat_buf+(index%16)*32+0, 11);
-    p->attr = *(uint8_p)(fat_buf+(index % 16)*32+0x11);
-    p->cluster = *(uint16_p)(fat_buf+(index%16)*32+0x14) << 16 |
+    p->attr = *(uint8_p)(fat_buf+(index % 16)*32+0x0b);
+    p->cluster = (uint32_t)*(uint16_p)(fat_buf+(index%16)*32+0x14) << 16 |
                  *(uint16_p)(fat_buf+(index%16)*32+0x1a);
     p->length = *(uint32_p)(fat_buf+(index%16)*32+0x1c);
 
@@ -371,6 +373,7 @@ int fat_read_fte(int index, SFTE* p) {
 
 void search_file(const char* name, uint32_p cluster, uint32_p size) {
     int idx=0;
+    uint32_t directory_cluster = root_cluster;
     SFTE e;
     memzero(&e, sizeof(e));
     char fixed_name[12];
@@ -378,7 +381,21 @@ void search_file(const char* name, uint32_p cluster, uint32_p size) {
     memcpy(fixed_name, (uint8_p)name, 11);
     fixed_name[11]=0;
     
-    while (fat_read_fte(idx++, &e) == 0) {
+    /* One sector per cluster (validated by fat_init), 16 entries per sector.
+     * Directory clusters need not be physically adjacent: follow the FAT.
+     * next_cluster also uses fat_buf, so read the directory again afterwards.
+     */
+    while (directory_cluster >= 2 && directory_cluster < 0x0ffffff0) {
+        if (idx == 16) {
+            directory_cluster = next_cluster(directory_cluster);
+            idx = 0;
+            continue;
+        }
+        if (fat_read_fte(directory_cluster, idx++, &e) != 0)
+            break;
+        /* Ignore deleted entries, LFN slots, volume labels and directories. */
+        if ((uint8_t)e.name[0] == 0xe5 || (e.attr & 0x18) != 0)
+            continue;
         memcpy(resc_fixed, (uint8_p)e.name, 11);
         resc_fixed[11]=0;
         if (strcmp(fixed_name, resc_fixed) == 0) {
@@ -389,6 +406,7 @@ void search_file(const char* name, uint32_p cluster, uint32_p size) {
     }
 
     *cluster = 0;
+    *size = 0;
 }
 
 uint32_t next_cluster(uint32_t cluster) {

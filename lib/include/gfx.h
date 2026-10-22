@@ -16,6 +16,10 @@ typedef struct _RECT {
     int x,y,w,h;
 } RECT, *PRECT;
 typedef const RECT* PCRECT;
+typedef struct _RTPCS { // rectangle pieces 从某个大块区域选出一块区域保存下来
+    RECT info;
+    PVOID buffer;
+} RTPCS, *PRTPCS;
 
 void set_info(int w, int h, int bpp, int pitch);
 void set_fb(PVOID ptr);

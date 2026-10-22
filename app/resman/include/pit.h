@@ -6,6 +6,12 @@
 
 #define PIT_CLOCK 1193182u
 
+#define PIT_TIMER_HZ 1000u
+/* Round up: one tick must never be shorter than one millisecond. */
+#define PIT_TIMER_DIVISOR ((PIT_CLOCK+PIT_TIMER_HZ-1)/PIT_TIMER_HZ)
+extern volatile DWORD timer_ticks;
+DWORD resman_uptime_ms(void);
+
 #define PIT_CH0 0
 #define PIT_CH2 2
 

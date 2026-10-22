@@ -42,8 +42,14 @@ boot_disk_read(lba, count, destination)
 验证命令：
 
 ```sh
+python3 tests/loader_fat_test.py
 make
 python3 tests/boot_test.py
 ```
+
+`loader_fat_test.py` 用模拟磁盘运行 loader 中的实际 FAT 查找代码，覆盖第
+1/16/17/48 个目录项、不连续目录簇链、目录结束标记和非文件目录项过滤，
+不修改磁盘镜像。当前启动链要求每簇一个 512 字节扇区；超过 16 个目录项时，
+必须沿 FAT 表找到下一个目录簇，不能直接将簇号加一。
 
 测试以 QEMU 快照分别启动 PC/IDE 和 Q35/AHCI，检查进入 monitor，以及视频模式进入/退出；不会写入原镜像。

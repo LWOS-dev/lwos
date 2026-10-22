@@ -134,7 +134,7 @@ typedef struct _TASK {
     DWORD stack_size;   // +28h
 
     DWORD wake_tick;    // +2ch: sleep time left
-    DWORD run_ticks;    // +30h: ran ticks elapsed
+    DWORD run_ticks;    // +30h: CPU ticks (~1.001 ms per PIT tick)
     int exit_code;      // +34h
 
     WORD tss_selector;  // +38h

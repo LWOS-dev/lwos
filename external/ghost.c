@@ -1,17 +1,54 @@
 // gui host
 #include "abi.h"
 #include "resman.h"
-#include "gfx.h"
-#include "string.h"
-#include "convert.h"
-#include "mem.h"
-
-#include "tui/tui.h"
+#include "gui.h"
+#include "app.h"
+#include "task.h"
 
 PVOID *lw_abi_base;
 PVOID *rm_base;
-PVOID backbuffer,framebuffer;
-char text[100];
+static GUI_DISPLAY display;
+static GUI_TEXT_WINDOW demo_window={16,48,0};
+static DWORD demo_id;
+static DWORD focus_window;
+static RM_TEXT_SNAPSHOT snapshot;
+/* Focus is a GHOST policy. There is no stacking order yet. */
+static int update_window(void) {
+    if (demo_id) {
+        for (DWORD slot=0;slot<32;slot++) {
+            if (rm_text_snapshot(slot,&snapshot)==RM_OK && snapshot.task_id==demo_id) {
+                if (snapshot.task_state==TASK_DEAD)focus_window=0;
+                return 1;
+            }
+        }
+    }
+    focus_window=0;
+    return 0;
+}
+static void set_focus(DWORD window) {
+    if (focus_window==window)return;
+    LW_WINDOW_EVENT event={LW_WINDOW_FOCUS,0};
+    if (focus_window)rm_window_send(focus_window,&event);
+    focus_window=0;
+    if (window) {
+        event.value=1;
+        if (rm_window_send(window,&event)==RM_OK)focus_window=window;
+    }
+}
+
+static void close_demo(void) {
+    if (!demo_id)return;
+    set_focus(0);
+    int code;
+    rm_task_kill(demo_id); /* DEAD is already safe to reap. */
+    if (rm_task_reap(demo_id,&code)==RM_OK)demo_id=0;
+}
+static void draw_demo(void) {
+    if (!update_window())return;
+    demo_window.title=snapshot.task_state==TASK_DEAD ?
+        "TEXTDEMO.EXE - exited - C: close" : "TEXTDEMO.EXE - running - C: close";
+    gui_draw_text_window(&demo_window,&snapshot,focus_window==snapshot.window_id);
+}
 
 __attribute__((section(".text.start")))
 int lwp_main(const LW_ENV *env) {
@@ -20,54 +57,62 @@ int lwp_main(const LW_ENV *env) {
         return -1;
     lw_abi_base = env->abi;
     rm_base=env->rm;
-
-    DWORD width=lw_get_fb_w(), height=lw_get_fb_h();
-    DWORD pitch=lw_get_fb_pitch();
-    if (!width || !height || lw_get_fb_bpp()!=32 ||
-        width>0x1fffffffu || pitch<width*4 ||
-        pitch>0x7ffff000u/height)
-        return RM_ERR_NOT_READY;
-    DWORD buffer_size=pitch*height; // k right use actual buffer size
-    backbuffer=rm_alloc(buffer_size,4,0);
-    framebuffer=(PVOID)lw_get_fb();
-    memzero(text,100);
-    if (!backbuffer) {
-        putxy("FAILED ALLOCATE BACKBUFFER",0,0);
-        return RM_ERR_MEMORY;
-    }
-    memzero(backbuffer,(int)buffer_size);
-    memcpy(text,"ALLOCATED BACKBUFFER AT ",24);
-    hex_xlat((DWORD)backbuffer,text+24,8);
-    putxy(text,0,0);
-    memzero(text,100);
-    memcpy(text,"ALLOCATED FRAMEBUFFER AT ",25);
-    hex_xlat((DWORD)framebuffer,text+25,8);
-    putxy(text,0,1);
-    if (lw_gfx_enter()!=0) {
-        rm_free(backbuffer);
+    int rc=gui_open(&display);
+    if (rc!=RM_OK)return rc;
+    if (rm_text_host(1)!=RM_OK) {
+        gui_close(&display);
         return RM_ERR_NOT_READY;
     }
-    set_fb((PVOID)lw_get_fb());
-    set_bb(backbuffer);
-    set_info(width,height,32,pitch);
-
-    RM_MOUSE_POS pos = {(int)width/2, (int)height/2};
+    gui_draw_desktop("Desktop: T open / C close / Esc exit. Click window to focus.");
+    RM_MOUSE_POS pos = {(int)display.width/2, (int)display.height/2};
+    mouse_rect.info.x=0,mouse_rect.info.y=0;
+    mouse_rect.info.w=10,mouse_rect.info.h=10;
+    rectp_alloc(&mouse_rect);
     int running=1;
-    DWORD color=0xff0000;
+    int pointer_pressed=0;
     while (running) {
         int key;
+        update_window();
         while ((key=rm_getmpoll())!=VK_NONE) {
+            if (key==VK_LBUTTON) {
+                rm_getmpos(&pos);
+                int inside=update_window() && snapshot.task_state!=TASK_DEAD &&
+                    gui_text_window_contains(&demo_window,pos.x,pos.y);
+                set_focus(inside ? snapshot.window_id : 0);
+            }
+            if (key>=0 && key<VK_LBUTTON && focus_window) {
+                LW_WINDOW_EVENT event={LW_WINDOW_KEY,key};
+                int rc=rm_window_send(focus_window,&event);
+                if (rc)gui_draw_error("Window input unavailable");
+                continue;
+            }
             if (key==VK_ESC) running=0;
-            if (key==VK_LBUTTON) color=0x00ff00;
-            if (key==(VK_LBUTTON|VK_KEYUP)) color=0xff0000;
+            if (key=='t' || key=='T') {
+                int rc=demo_id ? RM_ERR_NOT_READY :
+                    lw_app_launch(lw_blk_get(0),"/TEXTDEMO.EXE",0,&demo_id);
+                if (rc)gui_draw_error("TEXTDEMO launch failed");
+                else if (update_window() && snapshot.task_state!=TASK_DEAD)
+                    set_focus(snapshot.window_id);
+            }
+            if (key=='c' || key=='C') {
+                close_demo();
+                gui_erase_text_window(&demo_window);
+            }
+            if (key==VK_LBUTTON) pointer_pressed=1;
+            if (key==(VK_LBUTTON|VK_KEYUP)) pointer_pressed=0;
         }
         rm_getmpos(&pos);
-        putpixel(pos.x,pos.y,color);
-        gfx_update();
-        if (running) rm_input_wait();
+        draw_demo();
+        gui_draw_pointer(pos.x,pos.y,pointer_pressed,&display);
+        gui_present(&display);
+        if (running) {
+            if (demo_id)asm volatile("sti; hlt":::"memory");
+            else rm_input_wait();
+        }
     }
 
-    lw_gfx_exit();
-    rm_free(backbuffer);
+    close_demo();
+    rm_text_host(0);
+    gui_close(&display);
     return RM_OK;
 }

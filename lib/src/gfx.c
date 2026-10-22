@@ -6,6 +6,7 @@ PDWORD bb;
 
 RECT dirty_rects[16];
 int dirty_rect_cnt;
+RTPCS pcs_screen; // 屏幕是个选区
 
 static void add_dr(PCRECT pr) {
     if (pr->w<=0 || pr->h<=0)return;

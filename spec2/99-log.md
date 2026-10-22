@@ -4,6 +4,12 @@
 
 ---
 
+## 2026-10-22  C0 / GHOST 文本窗口闭环
+
+- 做到：mkexe --text → resman 分配/传 env → TEXTDEMO 写字符 → GHOST 快照绘制；T 打开、C 回收、Esc 清理退出。QEMU PC/Q35 验证字符像素、退出码 42、反复回收和冲突 flags 拒绝。
+- 下一步：C1 通用窗口生命周期与多实例，再接字符流、格式化器和 CRT/stdio。
+- 坑：C0 保留 DEAD 任务直至关闭；尚不支持任务先 reap、窗口继续保留。内置字体原声明为 2048，实际包含 4096 字节，已修正以供 GHOST 链接。
+
 ## 2026-10-21  文本窗口 / stdio 需求定稿
 
 - 做到：新增 [61](61-text-console-stdio.md)，明确 TEXT flag → resman 字符缓冲区 → env → GHOST 绘制 → CRT/printf 的目标链路；同步 EXE、GUI、索引和路线。此次仅更新规格，未实现运行时代码。

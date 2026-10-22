@@ -22,6 +22,10 @@ struct _RM_IMAGE {
     PVOID stack;
     DWORD stack_size;
     WORD owner, state;
+    LW_BUF_TXT text;
+    DWORD window_id, text_task;
+    LW_WINDOW_EVENT events[LW_WINDOW_QUEUE_SIZE];
+    DWORD event_head, event_tail;
 };
 
 extern const PVOID lw_rm[LW_RM_SLOT_COUNT];
@@ -31,11 +35,21 @@ int resman_autoload_ghost(void);
 
 int resman_init(void);
 DWORD resman_version(void);
+int resman_sleep(DWORD milliseconds);
 
 PVOID resman_alloc(DWORD size, DWORD align, DWORD tag);
 int resman_free(PVOID p);
 /* Private: reap calls this before allowing a task ID to be reused. */
 void resman_alloc_reap(DWORD owner);
+
+void resman_text_task_gone(DWORD id);
+int resman_text_host(int enable);
+int resman_text_available(void);
+int resman_text_snapshot(DWORD slot, RM_TEXT_SNAPSHOT *out);
+
+int resman_window_send(DWORD window, const LW_WINDOW_EVENT *event);
+int resman_window_poll(DWORD window, LW_WINDOW_EVENT *event);
+int resman_window_wait(DWORD window);
 
 int resman_image_acquire(PRM_IMAGE *out);
 int resman_image_load(PCVOID file, DWORD file_size, WORD owner, PRM_IMAGE *out);

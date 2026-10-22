@@ -191,11 +191,17 @@ const char ph_str[][8] = {
     "PT_LOAD"
 };
 int main(int argc, char **argv) {
+    unsigned int exe_flags=0;
+    if (argc==4 && !strcmp(argv[1],"--text")) {
+        exe_flags=LWP_FLAG_TEXT;
+        --argc;
+        ++argv;
+    }
     MkexeBuffer buf={0};
     MkexeImage img={0};
     if (argc==2 && (!strcmp(argv[1],"-h") || !strcmp(argv[1], "--help"))) {
         printf("usage:\n");
-        printf("mkexe input.elf output.exe\n");
+        printf("mkexe [--text] input.elf output.exe\n");
         printf("mkexe -d file.exe\n");
         return 0;
     }
@@ -204,6 +210,7 @@ int main(int argc, char **argv) {
         return 2;
     }
     int dump=!strcmp(argv[1],"-d");
+    if (exe_flags && dump)return 2;
     printf("path_in =%s\n",argv[dump?2:1]);
 
     unsigned int image_size=0, mem_size=0;
@@ -298,6 +305,7 @@ int main(int argc, char **argv) {
                 mem_size = mem_end;
         }
 
+        img.header.flags=exe_flags;
         img.header.magic=LWP_MAGIC;
         img.header.version=LWP_VERSION;
         img.header.hdr_size=sizeof(img.header);

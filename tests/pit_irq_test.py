@@ -54,15 +54,10 @@ def check(machine):
                 time.sleep(.1)
             else:raise AssertionError('IRQ0 handler not installed')
             time.sleep(.2)
-            first=struct.unpack('<I',memory(RM['ticks'],4))[0]
+            first=struct.unpack('<I',memory(RM['timer_ticks'],4))[0]
             time.sleep(.2)
-            second=struct.unpack('<I',memory(RM['ticks'],4))[0]
+            second=struct.unpack('<I',memory(RM['timer_ticks'],4))[0]
             assert first!=second, (first,second)
-            tone=struct.unpack('<I',memory(RM['cnt'],4))[0]
-            for _ in range(30):
-                time.sleep(.05)
-                if struct.unpack('<I',memory(RM['cnt'],4))[0]!=tone:break
-            else:raise AssertionError('one-second tone divider stalled')
             before=struct.unpack('<I',memory(RM['kb_irq_cnt'],4))[0]
             qmp('send-key', {'keys':[{'type':'qcode','data':'a'}], 'hold-time':40})
             time.sleep(.2)
@@ -70,7 +65,7 @@ def check(machine):
             assert after>before, (before,after)
             screen=memory(0xb8000,160)[::2]
             assert not screen.startswith(b'RESMAN UNHANDLED INTERRUPT'), screen
-            print(f'PASS: {machine} IRQ0 ticks advance; one-second tone divider; IRQ1 remains responsive',flush=True)
+            print(f'PASS: {machine} IRQ0 millisecond ticks advance; IRQ1 remains responsive',flush=True)
             qmp('quit');guest.wait(timeout=3)
             stream.close();connection.close()
         finally:

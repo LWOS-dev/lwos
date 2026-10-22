@@ -1,6 +1,7 @@
 #include "../include/task.h"
 #include "../include/resman.h"
 #include "../include/keyboard.h"
+#include "../include/pit.h"
 
 #include "abi.h"
 
@@ -236,6 +237,17 @@ int resman_task_create(PRM_IMAGE image, PCLW_ENV env, PDWORD out_id) {
         rt->env.rm = (PVOID *)lw_rm;
     }
 
+    memzero(&rt->env.vi,sizeof(rt->env.vi));
+    rt->env.vi.size=sizeof(LW_VI);
+    if (image->flags & LWP_FLAG_TEXT) {
+        if (!resman_text_available()) {rc=RM_ERR_NOT_READY;goto rollback;}
+        rt->env.vi.mode=LW_VI_TEXT;
+        rt->env.vi.window_id=image->window_id;
+        rt->env.vi.txt=&image->text;
+        image->text_task=id;
+    } else if (image->flags & LWP_FLAG_NWIN) {
+        rt->env.vi.mode=LW_VI_NONE;
+    }
     tk->entry=image->entry;
     tk->image_base=(DWORD)image->base;
     tk->image_size=image->mem_size;
@@ -331,12 +343,51 @@ static void task_unlock(DWORD flags) {
     asm volatile("pushl %0; popfl" :: "r"(flags) : "memory", "cc");
 }
 
+/* Called by IRQ0 with interrupts masked. Signed differences tolerate tick
+ * wrap as long as each requested sleep is shorter than half the tick range.
+ */
+int task_timer_tick(DWORD now) {
+    int woke=0;
+    for (DWORD id=0;id<TASK_MAX;id++) {
+        if (task[id].state==TASK_WAITING && runtime[id].wait_reason==TASK_WAIT_TIMER &&
+            (int)(now-task[id].wake_tick)>=0) {
+            task_wake_locked(id,TASK_WAIT_TIMER);
+            woke=1;
+        }
+    }
+    return woke;
+}
+int resman_sleep(DWORD milliseconds) {
+    if (milliseconds>RM_SLEEP_MAX_MS)return RM_ERR_ARGUMENT;
+    DWORD flags=task_lock();
+    int rc=RM_ERR_NOT_READY;
+    if (!(flags&0x200) || !current_task || !idle_task || current_task==idle_task ||
+        current_task->state!=TASK_RUNNING)goto done;
+    if (!milliseconds) {
+        task_schedule(); /* sleep(0) yields without entering the timer queue. */
+    } else {
+        /* The first IRQ may arrive immediately after this call. Add a whole
+         * extra tick so even that phase cannot cause an early return.
+         */
+        current_task->wake_tick=timer_ticks+milliseconds+1;
+        do {
+            task_block_locked(TASK_WAIT_TIMER);
+        } while ((int)(timer_ticks-current_task->wake_tick)<0);
+        current_task->wake_tick=0;
+    }
+    rc=RM_OK;
+done:
+    task_unlock(flags);
+    return rc;
+}
+
 int resman_task_exit(int exit_code) {
     DWORD flags=task_lock();
     if (!current_task || current_task==&task[0]) {
         task_unlock(flags);
         return RM_ERR_ARGUMENT;
     }
+    resman_text_host(0);
     current_task->exit_code=exit_code;
     current_task->state=TASK_DEAD;
     resman_keyboard_task_gone(current_task->id);
@@ -357,6 +408,7 @@ int resman_task_kill(DWORD id) {
     }
     tk->exit_code=RM_TASK_EXIT_KILLED;
     tk->state=TASK_DEAD;
+    resman_text_task_gone(id);
     resman_keyboard_task_gone(id);
     rc=RM_OK;
 done:

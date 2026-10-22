@@ -59,7 +59,8 @@ B 放入八个不同的负数，并使用不同的舍入模式、TOP 和条件�
 在开启中断的忙循环之后用 `fnsave/frstor` 取得快照，逐字节核对八个 80 位值，
 并核对控制字、状态字和标签字。保留位、指令和数据指针不参与比较。
 每次核对成功，A 给 WORK 加 1，B 加 2；两个循环都没有 sleep/yield。
-PIT 以 100 Hz 触发 IRQ0，EOI 后通过 TSS far JMP 轮转 READY 任务，
+PIT 使用 1194 分频（约 999.315 Hz）触发 IRQ0，普通抢占每 10 tick 执行一次，
+定时等待到期则立即调度，通过 TSS far JMP 轮转 READY 任务，
 因此 A、B 都持续运行，MONITOR 也仍能响应键盘。同一个文件启动多次会得到不同 ID。
 F4 保持原来的同步执行行为；这两个死循环请用 F7 启动。
 
@@ -139,3 +140,115 @@ align=0 为默认对齐，也可指定 1..4096 的二次幂；失败只返回 NU
 释放与嵌套关中断恢复；F7 正常退出码为 29（十六进制 1D），故意保留的两页由 F9 回收。
 MEMLOOP.EXE 持续分配、校验并释放临时缓冲区，可启动两份，通过 WORK 观察进度，
 再 F8/F9 终止回收。共享内存的所有权转移不包含在本接口中。
+
+
+## GHOST 文本窗口最小闭环（C0）
+
+通用加载入口声明在 `lib/include/app.h`，实现在 `lib/src/app.c`：
+
+```c
+DWORD task_id = 0;
+int rc = lw_app_launch(lw_blk_get(0), "/TEXTDEMO.EXE", 0, &task_id);
+```
+
+它负责文件读取、映像加载、任务创建及失败清理；成功后由调用方管理任务，
+退出后调用 `rm_task_reap`，仍运行时先 `rm_task_kill`。调用方需初始化 `rm_base`，
+串行访问磁盘，且 TEXT 程序仍要求已注册文本 host。当前保留 1 MiB 文件大小上限。
+链接需包含 APP 库的 `app.o`、`fs.o` 及其依赖；GHOST 已配置。
+路径、单窗口限制、焦点和任务关闭策略由 GHOST 决定；加载库不依赖 demo 名称或图形接口。
+`make test-app-launch` 验证参数、加载失败清理和成功后的映像所有权转交。
+
+运行 `make` 更新镜像后启动 `make run`，进入 GHOST：
+
+- **T**（桌面焦点）：加载根目录 `TEXTDEMO.EXE`，打开并聚焦一个 80×25 文本窗口。
+- **C**（桌面焦点）：关闭窗口，终止尚在运行的示例并回收任务/映像/缓冲区。
+- **Esc**（桌面焦点）：先清理示例，再退出 GHOST 返回 monitor。
+- 单击窗口获得焦点，单击桌面取消焦点；标题栏颜色显示焦点状态。
+
+`textdemo.c` 通过 `env->vi.txt->buffer` 写入字符/颜色，等待窗口事件并回显输入，Enter 返回 42。
+标题显示十六进制退出码 `0000002A`；内容保留到关闭窗口。
+它不调用分配器或绘图接口，也不接触 framebuffer。构建通过 `mkexe --text` 设置 `flags=0x10`。
+
+resman 加载时分配字符缓冲区，创建任务时注入环境；GHOST 定期调用
+`rm_text_snapshot` 拷贝字符和任务状态，再交给 GUI 库用内置字体绘制。快照不暴露共享指针，
+复制期间禁止任务切换，绘图期间无需持有 resman 资源。GHOST 在进入图形模式后注册、退出时注销。
+无 GUI host 时 TEXT 加载被拒绝，F4 同步执行 TEXT 暂不支持；旧程序 flags=0 保持原行为。
+
+首版只管理一个示例窗口，保留 DEAD 任务及其映像直到关闭，不支持提前 reap 后继续保留窗口。
+CRT/main/stdio、stdin 行编辑、拖动、多窗口和 Z 序属于后续阶段。
+`python3 tests/text_window_test.py` 在 QEMU PC/Q35 对比完整客户区的字形/颜色，
+检查焦点切换、按键隔离、等待/唤醒、退出码、窗口代次、反复关闭后的内存位图和冲突 flags 的失败回滚。
+截图输出到 `build/text-window.ppm`。
+
+
+## 窗口事件与焦点
+
+`lib/include/window.h` 定义 `LW_WINDOW_EVENT`，resman 在 ABI 表末尾追加：
+
+- `rm_window_send(window_id, &event)`：仅注册的 GHOST host 可发送。类型为
+  `LW_WINDOW_KEY`（value 为现有字符/VK 码）或 `LW_WINDOW_FOCUS`（0/1）。
+- `rm_window_poll(window_id, &event)`：仅窗口所属任务可读取；1 表示事件，
+  0 表示队列为空，负值表示错误。
+- `rm_window_wait(window_id)`：所属任务在队列为空时原子阻塞；新事件唤醒。
+
+每窗口独立 FIFO 可容纳 31 个事件，满时返回 `RM_ERR_NOT_READY`，不覆盖旧事件。
+发送使用带代次的窗口 ID，拒绝已退出窗口和旧 ID；键盘事件不包含鼠标按钮。
+焦点保存在 GHOST 的 `focus_window`，resman 只负责投递、权限检查与等待/唤醒。
+应用仍不取得全局键盘所有权。焦点窗口收到全部键盘事件，包括 C、T、Esc；
+如需 GHOST 快捷键，先点击桌面。焦点通知与按键共用有序队列。
+窗口退出、关闭或失效时，GHOST 清除焦点；当前仍只管理一个窗口，没有 Z 序。
+
+`make test-window-event` 检查 FIFO 边界、读写权限、无效事件和失效窗口 ID。
+`python3 tests/text_window_test.py` 覆盖完整 GHOST 输入链路。
+
+
+## GUI 绘制库
+
+`lib/include/gui.h` / `lib/src/gui.c` 提供单显示器渲染接口，GHOST 只传入
+窗口位置、标题、文本快照和焦点状态：
+
+```c
+GUI_TEXT_WINDOW window = {16, 48, "My application"};
+gui_draw_text_window(&window, &snapshot, focused);
+gui_present();
+```
+
+- `gui_open` / `gui_close`：图形模式、后备缓冲区和字体的初始化与释放。
+  调用方先初始化 ABI 指针，`GUI_DISPLAY` 用 `{0}` 初始化；底层 gfx 为全局状态，
+  同时只支持一个显示器实例。
+- `gui_draw_desktop` / `gui_draw_error`：桌面和状态提示。
+- `gui_draw_text_window` / `gui_erase_text_window`：窗口边框、焦点标题栏、
+  退出码、80×25 字符及颜色绘制，以及关闭后的区域清除。
+- `gui_text_window_rect` / `gui_text_window_contains`：共享窗口尺寸计算和命中判断。
+- `gui_draw_pointer` / `gui_present`：鼠标标记和画面提交。
+
+字体、调色板和窗口装饰尺寸集中在 GUI 库；库不查询任务、修改焦点或加载应用。
+GHOST 链接 APP 库的 `gui.o` 及现有 gfx/mem/convert 依赖。
+`python3 tests/text_window_test.py` 验证抽取后的完整客户区像素、焦点和关闭回收。
+
+
+## 毫秒 sleep
+
+初始化 `rm_base = env->rm` 后直接调用，无需链接额外库：
+
+```c
+DWORD started = rm_uptime_ms();
+int rc = rm_sleep(1);  /* 阻塞当前任务，最小正数请求为 1 ms。 */
+DWORD elapsed = rm_uptime_ms() - started;
+```
+
+`sleep(0)` 让出 CPU；正数请求使用 `TASK_WAIT_TIMER` 和 `wake_tick`，不忙等。
+调用需要处于运行任务且中断开启，否则返回 `RM_ERR_NOT_READY`；超出
+`RM_SLEEP_MAX_MS`（0x7ffffffd）的请求返回 `RM_ERR_ARGUMENT`。
+截止 tick 的比较支持 32 位回绕；`rm_uptime_ms()` 也会在约 49.7 天回绕，
+应使用无符号减法计算短时间间隔。CPU `run_ticks` 现在每个 PIT tick 增加。
+
+PIT 时钟 1193182 Hz，分频 1194，一个 tick 约 1.000686 ms。
+为覆盖调用恰在下次 IRQ 前的相位差，正数请求按 `ms + 1` 个 tick 等待。
+空闲时 `sleep(1)` 通常约 1–2 ms；更长请求还包含 PIT 分频误差。
+调度竞争、关中断及虚拟机负载会延长等待，这个接口不承诺实时截止精度。
+普通抢占仍约 10 ms；到期睡眠任务在 1 ms 计时 tick 上被唤醒并参与调度。
+
+`python3 tests/sleep_test.py` 在临时镜像上验证阻塞、idle、键盘不唤醒定时等待、
+禁中断/越界参数、sleep(0) 及 tick 回绕，并以 PIT 校准 TSC，打印 1/5/10 ms
+请求各 32 次采样的最小和最大延迟。测试结果是 QEMU TCG 测量，不代表真机上界。

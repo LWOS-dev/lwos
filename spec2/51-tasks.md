@@ -123,3 +123,17 @@ typedef struct {
 
 - CNC 场景以后可能需要"实时任务"（固定周期、高优先级，用来发步进脉冲）。第一版的调度是平等轮转；实时类以后单独设计，可能直接在 IRQ0 里做，不走任务切换。
 - 时钟频率：100Hz 够用吗？步进控制可能要求更高，那部分建议用 PIT 的另一个通道或 APIC 定时器单独处理。
+
+
+## 当前毫秒睡眠实现
+
+新增公开 ABI `rm_sleep(DWORD ms)` / `rm_uptime_ms()`，槽位追加在 0x69、0x6A。
+PIT 通道 0 使用 mode 2（0x34）、分频 1194，计时 tick 约 1.000686 ms；
+常规任务抢占每 10 tick，定时等待到期则立即参与调度。
+`sleep(0)` yield，正数用 `TASK_WAIT_TIMER` 阻塞，截止值为当前 tick + ms + 1，
+额外 tick 覆盖调用相位，避免提前返回。最小正数请求 1 ms，正常空闲延迟约 1–2 ms。
+最大请求 0x7ffffffd，tick 回绕使用有符号差比较；关中断或非运行任务调用返回错误。
+`rm_uptime_ms()` 累计 PIT 小数误差，32 位毫秒计数约 49.7 天回绕。
+`TASK.run_ticks` 现在以每个 PIT tick 累加，约 1.001 ms；不是常规调度次数。
+`tests/sleep_test.py` 在 PC/Q35 临时 guest 中测试阻塞、idle、等待原因隔离、
+参数、tick 回绕，并输出基于 PIT 校准 TSC 的延迟采样。

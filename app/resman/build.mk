@@ -41,3 +41,14 @@ $(RM_ELF): $(RM_OBJS) $(RM_LIB_OBJS) $(RM_DIR)/resman.ld
 
 FSROOT_FILES += $(FSROOT)/RESMAN.BIN
 $(FSROOT)/RESMAN.BIN: $(RM_BIN)
+
+$(BUILD_DIR)/tests/window_event_test: tests/window_event_test.c $(RM_DIR)/src/image.c \
+    $(wildcard $(RM_DIR)/include/*.h) $(wildcard lib/include/*.h)
+	@mkdir -p $(@D)
+	$(TOOL_C) -std=gnu11 -Wall -Wextra -fno-builtin -Wno-pointer-to-int-cast \
+	    -ffunction-sections -fdata-sections $(LIB_INC) \
+	    tests/window_event_test.c $(RM_DIR)/src/image.c -Wl,--gc-sections -o $@
+
+test-window-event: $(BUILD_DIR)/tests/window_event_test
+	$<
+.PHONY: test-window-event

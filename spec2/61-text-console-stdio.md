@@ -22,14 +22,17 @@ int main(void)
 
 ## 现状
 
-截至 2026-10-21，工作区已有以下基础，但尚未完成本篇闭环：
+截至 2026-10-22，C0 最小闭环已实现：
 
-- `lib/include/lwp.h` 已定义 `LWP_FLAG_NWIN = 0x08`、`LWP_FLAG_TEXT = 0x10`、`LWP_FLAG_GFX = 0x20`。
-- `lib/include/resman.h` 已有 `LW_BUF_TXT`、`LW_VI` 和 `LW_ENV.vi`，可传递文本缓冲区描述符。
-- `app/resman/src/image.c:resman_image_load` 已保存映像 flags，尚未根据 TEXT 建立文本窗口资源。
-- 外部程序目前显式使用 `lwp_main(const LW_ENV *)`；本篇提出的自动绑定 stdout 和普通 main 启动链仍待实现。
+- `mkexe --text` 设置 `LWP_FLAG_TEXT = 0x10`；resman 校验互斥标志、分配并初始化 80×25 字符缓冲区。
+- `resman_task_create` 将持久描述符注入 `LW_ENV.vi.txt`，TEXTDEMO 写入字符并返回 42。
+- GHOST 按 T 加载示例，通过 `rm_text_snapshot` 获取字符副本，绘制 640×400 客户区；C 关闭，Esc 清理后退出。
+- 新增 resman slots 0x64（TEXT_HOST）、0x65（TEXT_SNAPSHOT）。快照按映像槽查询，IRQ 临界区内复制，GHOST 不保留源缓冲区指针。
+- QEMU PC/Q35 验证完整客户区像素、退出码、反复打开/关闭的内存回收和冲突标志拒绝。
 
-以下接口语义与里程碑属于设计要求；新增接口名称和 slot 在实现时确定。
+C0 的范围限制：单个示例窗口，退出后暂时保留整个 DEAD 任务，关闭时一起 reap；
+尚未实现任务回收与窗口寿命分离、通用窗口注册、CRT 或 stdio。无 host 时拒绝 TEXT 加载，
+F4 同步运行 TEXT 返回不支持。以下完整设计仍是后续目标，不代表全部已实现。
 
 ## 依赖
 
@@ -173,5 +176,18 @@ GHOST 正常退出也必须清理或移交注册窗口，不留下悬空读取�
 
 - resman 窗口查询、获取/释放引用、状态通知的最终 ABI 名称与 slot 分配。
 - 光标附属元数据的公开布局；更新序号与批量输出同步策略。
-- 后续焦点输入队列、stdin 行编辑、shell、重定向及输出历史；80×25 可见缓冲区本身不等于终端历史。
+- stdin 行编辑、shell、重定向及输出历史；80×25 可见缓冲区本身不等于终端历史。
 - UTF-8、中文字体、窗口尺寸调整、完整 printf 格式和文件流支持，按独立里程碑扩展。
+
+
+## 当前焦点输入接口
+
+GHOST 保存焦点窗口 ID；新建窗口及点击窗口获得焦点，点击桌面取消焦点。
+焦点窗口收到全部键盘事件，桌面快捷键仅在无窗口焦点时生效。任务退出或窗口关闭时清除焦点。
+本阶段不管理 Z 序，仍为单窗口。焦点状态不放进 resman。
+
+`window.h` 定义 `LW_WINDOW_EVENT { type, value }`，类型为键盘及获得/失去焦点。
+resman 追加 `WINDOW_SEND/POLL/WAIT` ABI 槽位（0x66..0x68）：host 发送、窗口任务
+轮询/等待。按窗口代次 ID 查找，每窗口 FIFO 有效容量 31，满时拒绝新事件；
+发送后唤醒 `TASK_WAIT_WINDOW`，队列空检查和休眠在同一临界区完成。
+旧 ID、已退出窗口及无权调用者被拒绝。TEXTDEMO 用该接口回显字符，Enter 返回 42。

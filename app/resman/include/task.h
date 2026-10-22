@@ -7,7 +7,8 @@
 typedef enum {
     TASK_WAIT_NONE,
     TASK_WAIT_KEYBOARD,
-    TASK_WAIT_TIMER
+    TASK_WAIT_TIMER,
+    TASK_WAIT_WINDOW
 } TASK_WAIT_REASON; // 等待理由
 
 /* RESMAN 私有运行时状态；应用通过映像头槽位访问。 */
@@ -27,6 +28,7 @@ extern TASK task[TASK_MAX];
 extern PTASK current_task;
 
 void task_schedule(void);
+int task_timer_tick(DWORD now);
 void task_bootstrap(void);
 void gdt_init(void);
 void gdt_update(void);
