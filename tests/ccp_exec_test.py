@@ -50,6 +50,7 @@ def check(machine):
         shutil.copyfile(ROOT/'bin/coreutils/cat.exe',tool_dir/'CAT.EXE')
         shutil.copyfile(ROOT/'bin/coreutils/sed.exe',tool_dir/'SED.EXE')
         shutil.copyfile(ROOT/'bin/coreutils/ed.exe',tool_dir/'ED.EXE')
+        shutil.copyfile(ROOT/'bin/coreutils/hed.exe',tool_dir/'HED.EXE')
         shutil.copyfile(ROOT/'bin/coreutils/touch.exe',tool_dir/'TOUCH.EXE')
         shutil.copyfile(ROOT/'bin/coreutils/xxd.exe',tool_dir/'XXD.EXE')
         subprocess.run(['mcopy','-s','-o','-i',f'{disk}@@{2048*512}',str(tool_dir),'::/'],check=True)
@@ -61,6 +62,8 @@ def check(machine):
             'EDIN.TXT':b'one\nold old\nthree\n',
             'EDOUT.TXT':b'obsolete tail that must disappear\n'*20,
             'EMPTY.TXT':b'truncate me\n',
+            'HEDIN.BIN':bytes([0,255,10,65,66]),
+            'HEDOUT.BIN':b'obsolete binary tail'*20,
         }.items():
             fixture=work/name;fixture.write_bytes(contents)
             subprocess.run(['mcopy','-o','-i',f'{disk}@@{2048*512}',str(fixture),'::/'+name],check=True)
@@ -116,14 +119,17 @@ def check(machine):
                 for name,expected in {'EDOUT.TXT':b'one\nnew new\n',
                                       'NEW.TXT':b'hello ed\n','EMPTY.TXT':b'',
                                       'SEDOUT.TXT':b'alpha 12\n',
-                                      'TOUCH.TXT':b'','TESTDIR/REL.TXT':b''}.items():
+                                      'TOUCH.TXT':b'','TESTDIR/REL.TXT':b'',
+                                      'HEDIN.BIN':bytes([0,255,10,65,66]),
+                                      'HEDOUT.BIN':bytes([0,127,0,222,173,190,239]),
+                                      'NEWHEX.BIN':bytes([0,255,10])}.items():
                     actual=work/('saved-'+name.replace('/','-'))
                     subprocess.run(['mcopy','-o','-i',f'{disk}@@{2048*512}','::/'+name,str(actual)],check=True)
                     assert actual.read_bytes()==expected, (name,actual.read_bytes())
                 absent=subprocess.run(['mdir','-i',f'{disk}@@{2048*512}','::/NOEXIST'],
                     stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
                 assert absent.returncode!=0, 'touch unexpectedly created a parent directory'
-                print(f'PASS: {machine}: touch create/repeat/preserve/cwd/missing parent; sed/ed; CCP resumes; no leaked images',flush=True)
+                print(f'PASS: {machine}: touch; sed/ed; hed binary edits/undo/dirty quit/write; CCP resumes; no leaked images',flush=True)
         finally:
             if guest.poll() is None:guest.terminate();guest.wait(timeout=3)
 

@@ -7,6 +7,7 @@ SED_PORT_OBJS := $(addprefix $(BUILD_DIR)/external/coreutils/,port/compat.o vend
 ED_PORT_OBJS := $(addprefix $(BUILD_DIR)/external/coreutils/,port/compat.o vendor/busybox/ed.o)
 $(BIN_DIR)/coreutils/sed.elf: $(SED_PORT_OBJS)
 $(BIN_DIR)/coreutils/ed.elf: $(ED_PORT_OBJS)
+$(BIN_DIR)/coreutils/hed.elf: $(BUILD_DIR)/external/coreutils/port/compat.o
 
 $(BUILD_DIR)/external/coreutils/%.o: external/coreutils/%.c external/coreutils/build.mk
 	@mkdir -p $(@D)
@@ -88,6 +89,14 @@ $(BUILD_DIR)/tests/xxd_test: tests/xxd_test.c external/coreutils/xxd.c $(wildcar
 test-xxd: $(BUILD_DIR)/tests/xxd_test
 	$<
 .PHONY: test-xxd
+
+$(BUILD_DIR)/tests/hed_test: tests/hed_test.c external/coreutils/hed.c lib/src/string.c $(wildcard lib/include/*.h)
+	@mkdir -p $(@D)
+	$(TOOL_C) -std=gnu11 -Wall -Wextra -Werror -Wno-pointer-to-int-cast \
+	    -Wno-int-to-pointer-cast -Wno-return-type -fno-builtin $(LIB_INC) tests/hed_test.c lib/src/string.c -o $@
+test-hed: $(BUILD_DIR)/tests/hed_test
+	$<
+.PHONY: test-hed
 
 $(BUILD_DIR)/tests/touch_test: tests/touch_test.c external/coreutils/touch.c $(wildcard lib/include/*.h)
 	@mkdir -p $(@D)

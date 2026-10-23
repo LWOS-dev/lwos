@@ -156,6 +156,18 @@ int lwp_main(PCLW_ENV env) {
     CHECK(command("1,$d"));CHECK(wait_tail("ed> "));
     CHECK(command("w /EMPTY.TXT"));CHECK(wait_tail("ed> "));
     CHECK(command("q"));CHECK(wait_tail(prompt_text));
+    CHECK(command("hed /HEDIN.BIN"));CHECK(wait_tail("hed> "));
+    CHECK(command("0x1 o 7f 00"));CHECK(wait_tail("hed> "));
+    CHECK(command("0x3,0x4 c de ad be ef"));CHECK(wait_tail("hed> "));
+    CHECK(command("q"));CHECK(wait_tail("hed> ")); /* Dirty quit must retain the editor. */
+    CHECK(command("u"));CHECK(wait_tail("hed> "));
+    CHECK(command("u"));CHECK(wait_tail("hed> "));
+    CHECK(command("w /HEDOUT.BIN"));CHECK(wait_tail("hed> "));
+    CHECK(command("q"));CHECK(wait_tail(prompt_text));
+    CHECK(command("hed"));CHECK(wait_tail("hed> "));
+    CHECK(command("i"));CHECK(command("00 ff 0a"));CHECK(command("."));CHECK(wait_tail("hed> "));
+    CHECK(command("w /NEWHEX.BIN"));CHECK(wait_tail("hed> "));
+    CHECK(command("q"));CHECK(wait_tail(prompt_text));
     CHECK(command("touch /TOUCH.TXT /EDOUT.TXT"));CHECK(wait_tail(prompt_text));
     CHECK(command("touch /TOUCH.TXT"));CHECK(wait_tail(prompt_text));
     CHECK(command("cd /TESTDIR"));prompt_text="[/TESTDIR]$ ";CHECK(wait_tail(prompt_text));

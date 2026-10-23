@@ -1,5 +1,9 @@
 # 外部 C 程序
 
+无宿主机时参见 [LWP 手写汇编与二进制速查表](LWP-CHEATSHEET.md)：
+直接组织 LWP 文件头、代码、数据与重定位表；附完整 hello 汇编和可直接录入的十六进制字节，
+无需 mkexe。
+
 这里的程序与 `tools/mkexe/test.c` 一样，由 resman 装载运行，不固定装载地址。
 入口为 `int lwp_main(const LW_ENV *env)`，运行时定义取自 `lib/include/resman.h`。
 通过 `env->abi` 使用公开 ABI，不链接 ABI.BIN 的实现，不使用宿主 libc/CRT。
