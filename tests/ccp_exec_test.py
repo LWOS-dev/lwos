@@ -51,6 +51,7 @@ def check(machine):
         shutil.copyfile(ROOT/'bin/coreutils/sed.exe',tool_dir/'SED.EXE')
         shutil.copyfile(ROOT/'bin/coreutils/ed.exe',tool_dir/'ED.EXE')
         shutil.copyfile(ROOT/'bin/coreutils/touch.exe',tool_dir/'TOUCH.EXE')
+        shutil.copyfile(ROOT/'bin/coreutils/xxd.exe',tool_dir/'XXD.EXE')
         subprocess.run(['mcopy','-s','-o','-i',f'{disk}@@{2048*512}',str(tool_dir),'::/'],check=True)
         text_file=work/'CATTEST.TXT';text_file.write_bytes(b'cat data\n'*70+b'CAT END')
         subprocess.run(['mcopy','-o','-i',f'{disk}@@{2048*512}',str(text_file),'::/CATTEST.TXT'],check=True)

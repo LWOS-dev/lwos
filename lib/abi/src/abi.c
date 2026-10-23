@@ -73,6 +73,8 @@ const PVOID lw_abi[LW_SLOT_COUNT] __attribute__((section(".abi"), used, aligned(
     [LW_SLOT_PCI_PRESENT]       = (PVOID)pci_present,
     [LW_SLOT_PCI_READ_DWORD]    = (PVOID)pci_read_dword,
     [LW_SLOT_PCI_WRITE_DWORD]   = (PVOID)pci_write_dword,
+    [LW_SLOT_PCI_READ_WORD]     = (PVOID)pci_read_word,
+    [LW_SLOT_PCI_WRITE_WORD]    = (PVOID)pci_write_word,
 
     [LW_SLOT_DISK_PROBE]        = (PVOID)disk_probe,
     [LW_SLOT_DISK_COUNT]        = (PVOID)ata_count,

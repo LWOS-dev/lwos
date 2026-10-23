@@ -10,7 +10,17 @@
 
 ## 现状
 
-没有任何网络代码。bochsrc 里也没有配网卡。
+已实现首版 IRQ 驱动的 LWFT 文件接收：`app/resman/src/net.c` 管理
+82540EM（8086:100E）的 RX/TX DMA 环和 PIC/INTx，接收任务无数据时阻塞。
+`external/coreutils/netrecv.c` 安装到 `/BIN/NETRECV.EXE`；宿主工具
+`tools/lwcon/lwcon.c` 支持 `lwcon IFACE put FILE`，停等 ACK、重试和 CRC32。
+共用线协议在 `lib/include/lwft.h`。monitor 的 `nr` 也改用 resman IRQ 接口。
+`make test-netrecv` 已覆盖 QEMU PC/Q35 上的收发与落盘。
+82567LM（8086:10F5）已加入保留 BIOS 配置的 D0/PHY 接管分支和 `netrecv -d`
+诊断，已通过寄存器模型测试，尚待真机验证。尚未实现网络加载执行、完整 ICH
+PHY/NVM 复位初始化、共享 IRQ 分发或 IP/TCP。
+下面的 `lib/abi/net/` 拆分仍是后续设计；当前驱动实际放在 resman 内。
+命令用法、覆盖和超时语义见 [coreutils 说明](../external/coreutils/README.md#netrecv通过裸以太网接收文件)。
 
 ## 依赖
 

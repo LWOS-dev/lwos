@@ -13,7 +13,7 @@ typedef unsigned char* PBYTE;
 typedef unsigned short* PWORD;
 typedef unsigned int* PDWORD;
 typedef unsigned long long* PQWORD;
-typedef char* PCHAR;
+typedef char* PCHAR; // 表示固定的缓冲区数据
 
 typedef const void* PCVOID;
 typedef const unsigned char* PCBYTE;
@@ -28,7 +28,7 @@ typedef const unsigned long long* PCQWORD;
 // just addr spelling
 typedef CHAR* PSTR;
 typedef const CHAR* PCSTR;
-typedef PSTR STR;
+typedef PSTR STR; // 表示笼统的字符串
 typedef PSTR* PPSTR;
 typedef PCSTR* PPCSTR;
 

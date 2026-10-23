@@ -52,3 +52,12 @@ $(BUILD_DIR)/tests/stdio_test: tests/stdio_test.c lib/src/stdio.c lib/src/vsprin
 test-stdio: $(BUILD_DIR)/tests/stdio_test
 	$<
 .PHONY: test-stdio
+
+$(BUILD_DIR)/tests/convert_test: tests/convert_test.c lib/src/convert.c lib/src/string.c lib/include/convert.h lib/include/string.h lib/include/stdint.h
+	@mkdir -p $(@D)
+	$(TOOL_C) -std=gnu11 -Wall -Wextra -Werror -Wno-return-type -fno-builtin \
+	    $(LIB_INC) tests/convert_test.c lib/src/convert.c lib/src/string.c -o $@
+
+test-convert: $(BUILD_DIR)/tests/convert_test
+	$<
+.PHONY: test-convert

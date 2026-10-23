@@ -30,6 +30,9 @@ static void outl(WORD port, DWORD val) {
 }
 
 static ISR_HANDLER handlers[256];
+ISR_HANDLER resman_isr_get_handler(DWORD vector) {
+    return vector<256 ? handlers[vector] : 0;
+}
 
 int resman_isr_set_handler(DWORD vector, ISR_HANDLER handler)
 {

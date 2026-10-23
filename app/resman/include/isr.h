@@ -25,6 +25,7 @@ typedef void (*ISR_HANDLER)(PISR_FRAME frame);
 
 extern const DWORD resman_isr_table[256];
 int resman_isr_set_handler(DWORD vector, ISR_HANDLER handler);
+ISR_HANDLER resman_isr_get_handler(DWORD vector);
 void resman_isr_dispatch(PISR_FRAME frame);
 
 void pic_init(void);

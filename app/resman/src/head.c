@@ -2,6 +2,7 @@
 #include "../include/task.h"
 #include "../include/keyboard.h"
 #include "../include/pit.h"
+#include "../include/net.h"
 
 extern char __bss_start[], __bss_end[];
 
@@ -10,6 +11,11 @@ extern char __bss_start[], __bss_end[];
  */
 const PVOID lw_rm[LW_RM_SLOT_COUNT]
     __attribute__((section(".rmtab"), used, aligned(16))) = {
+    [LW_RM_SLOT_NET_OPEN] = (PVOID)resman_net_open,
+    [LW_RM_SLOT_NET_RECV] = (PVOID)resman_net_recv,
+    [LW_RM_SLOT_NET_SEND] = (PVOID)resman_net_send,
+    [LW_RM_SLOT_NET_CLOSE] = (PVOID)resman_net_close,
+    [LW_RM_SLOT_NET_INFO] = (PVOID)resman_net_info,
     [LW_RM_SLOT_IMAGE_SET_CAPTION] = (PVOID)resman_image_set_caption,
     [LW_RM_SLOT_WINDOW_SET_CAPTION] = (PVOID)resman_window_set_caption,
     [LW_RM_SLOT_TEXT_SNAPSHOT_CAPTION] = (PVOID)resman_text_snapshot_caption,

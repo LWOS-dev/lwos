@@ -34,6 +34,31 @@ $(FSROOT)/RES/LICENSE/ED.TXT: external/coreutils/vendor/busybox/LICENSE.ed
 coreutils: $(COREUTIL_EXES)
 external: coreutils
 .PHONY: coreutils
+
+$(BUILD_DIR)/tools/lwcon: tools/lwcon/lwcon.c lib/include/lwft.h
+	@mkdir -p $(@D)
+	$(TOOL_C) -std=gnu11 -O2 -Wall -Wextra -Werror $< -o $@
+lwcon: $(BUILD_DIR)/tools/lwcon
+
+$(BUILD_DIR)/tests/lwcon_test: tests/lwcon_test.c tools/lwcon/lwcon.c lib/include/lwft.h
+	@mkdir -p $(@D)
+	$(TOOL_C) -std=gnu11 -O2 -Wall -Wextra -Werror $< -o $@
+test-lwcon: $(BUILD_DIR)/tests/lwcon_test
+	$<
+
+$(BUILD_DIR)/tests/net_init_test: tests/net_init_test.c app/resman/src/net.c \
+    $(wildcard lib/include/*.h) $(wildcard app/resman/include/*.h)
+	@mkdir -p $(@D)
+	$(TOOL_C) -std=gnu11 -Wall -Wextra -Werror -Wno-pointer-to-int-cast \
+	    -Wno-int-to-pointer-cast -fno-builtin $(LIB_INC) $< -o $@
+test-net-init: $(BUILD_DIR)/tests/net_init_test
+	$<
+
+test-netrecv: $(BIN_DIR)/abi.bin $(BIN_DIR)/resman.bin $(BIN_DIR)/monitor.bin $(BIN_DIR)/coreutils/netrecv.exe \
+    $(BIN_DIR)/external/ccp.exe \
+    $(BUILD_DIR)/lib/app/app.o $(BUILD_DIR)/tools/lwcon
+	PYTHONDONTWRITEBYTECODE=1 python3 tests/netrecv_test.py
+.PHONY: lwcon test-lwcon test-net-init test-netrecv
 .SECONDARY: $(COREUTIL_ELFS) $(addprefix $(BUILD_DIR)/external/coreutils/,$(addsuffix .o,$(COREUTIL_NAMES)))
 
 $(BUILD_DIR)/tests/ls_test: tests/ls_test.c external/coreutils/ls.c lib/src/string.c $(wildcard lib/include/*.h)
@@ -54,6 +79,15 @@ $(BUILD_DIR)/tests/cat_test: tests/cat_test.c external/coreutils/cat.c $(wildcar
 test-cat: $(BUILD_DIR)/tests/cat_test
 	$<
 .PHONY: test-cat
+
+$(BUILD_DIR)/tests/xxd_test: tests/xxd_test.c external/coreutils/xxd.c $(wildcard lib/include/*.h)
+	@mkdir -p $(@D)
+	$(TOOL_C) -std=gnu11 -Wall -Wextra -Werror -Wno-pointer-to-int-cast \
+	    -fno-builtin $(LIB_INC) $< -o $@
+
+test-xxd: $(BUILD_DIR)/tests/xxd_test
+	$<
+.PHONY: test-xxd
 
 $(BUILD_DIR)/tests/touch_test: tests/touch_test.c external/coreutils/touch.c $(wildcard lib/include/*.h)
 	@mkdir -p $(@D)

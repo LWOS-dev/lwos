@@ -17,6 +17,16 @@ static int open_calls;
 static int allocated, loaded, runs, child_code;
 static LW_ENV terminal_env;
 static PVOID rm_table[LW_RM_SLOT_COUNT];
+static DWORD now_ms, time_reads;
+static DWORD uptime_ms(void) {
+    DWORD result=now_ms;
+    now_ms+=7;
+    time_reads++;
+    return result;
+}
+void stdio_get_cursor(PDWORD x,PDWORD y) {
+    *x=0;*y=0;
+}
 int fs_file_open(PFS_VOLUME volume,PCSTR path,PFS_FILE file) {
     (void)file;assert(volume->mounted);strcpy(opened_path,path);open_calls++;
     if (available_path && strcmp(path,available_path))return FS_ERR_NOT_FOUND;
@@ -98,12 +108,24 @@ static void reset(int selected) {
     pmt_p="";
 }
 int main(void) {
+    rm_table[LW_RM_SLOT_UPTIME_MS]=(PVOID)uptime_ms;
     rm_table[LW_RM_SLOT_ALLOC]=(PVOID)allocate;
     rm_table[LW_RM_SLOT_FREE]=(PVOID)release;
     rm_table[LW_RM_SLOT_IMAGE_LOAD]=(PVOID)load_image;
     rm_table[LW_RM_SLOT_IMAGE_RUN]=(PVOID)run_image;
     rm_table[LW_RM_SLOT_IMAGE_UNLOAD]=(PVOID)unload_image;
     rm_base=rm_table;
+    /* All command paths are timed, including errors; blank input is skipped.
+     * Start near wrap to check unsigned elapsed milliseconds as well.
+     */
+    reset(0);now_ms=0xfffffffcu;time_reads=0;
+    assert(execute("pwd")==0 && !strcmp(output,"/\nTime: 7 ms\n"));
+    assert(time_reads==2);
+    reset(0);time_reads=0;
+    assert(execute("")==0 && (int)execute(0)==-1 && !time_reads && !used);
+    reset(0);pmt_p="/BAD:";
+    assert((int)execute("path")==RM_ERR_ARGUMENT);
+    assert(!strcmp(output,"Time: 7 ms\n"));
     terminal_env.size=sizeof(terminal_env);terminal_env.vi.window_id=71;lw_env=&terminal_env;
     abi_table[LW_SLOT_BLK_GET]=(PVOID)get_device;
     lw_abi_base=abi_table;
@@ -118,6 +140,7 @@ int main(void) {
         reset(0);char arguments[]=" one\ttwo  ";pmt_p=arguments;child_code=42;
         assert(execute("./hello.exe")==42 && !strcmp(opened_path,"/hello.exe"));
         assert(!allocated && !loaded);
+        assert(!strcmp(output,"Time: 7 ms\n"));
     }
     assert(runs==3);child_code=0;
     const int failures[]={1,10,11,12,13,14};

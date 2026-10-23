@@ -127,10 +127,12 @@ int lwp_main(PCLW_ENV env) {
     CHECK(command("ls -l"));
     CHECK(wait_listing(1));
     CHECK(command("cat CATTEST.TXT"));
-    CHECK(wait_text("CAT END[/]$ ",0));
+    CHECK(wait_text("CAT END",1) && wait_text("Time: ",1));
     CHECK(command("cd /BIN"));prompt_text="[/BIN]$ ";CHECK(wait_text(prompt_text,1));
-    CHECK(command("cat ../CATTEST.TXT"));CHECK(wait_text("CAT END[/BIN]$ ",0));
+    CHECK(command("cat ../CATTEST.TXT"));CHECK(wait_text("CAT END",1) && wait_text("Time: ",1));
     CHECK(command("cd /"));prompt_text="[/]$ ";CHECK(wait_text(prompt_text,1));
+    CHECK(command("xxd -l5 /SEDIN.TXT"));CHECK(wait_text("00000000: 616c 7068 61",1));
+    CHECK(command("xxd -p -s1 -l4 /SEDIN.TXT"));CHECK(wait_text("6c706861",1));
     CHECK(command("sed 's/alpha/SED_OK/g' /SEDIN.TXT"));CHECK(wait_text("SED_OK 56",1));
     CHECK(command("sed -n '2p' /SEDIN.TXT"));CHECK(wait_text("beta 34",1));
     CHECK(command("sed -f /SCRIPT.SED /SEDIN.TXT"));CHECK(wait_text("56:alpha",1));

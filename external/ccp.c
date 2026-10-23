@@ -7,6 +7,7 @@
 #include "fs.h"
 #include "path.h"
 #include "mem.h"
+#include "time.h"
 
 CHAR prompt[256];
 CHAR cwd[256]="/BIN";
@@ -35,7 +36,13 @@ static void readline(void) {
         switch (t) {
             case EOF:return;
             case VK_ENTER:goto done;
-            case VK_BKSPACE:{if (p>prompt) {printf("\b \b");*--p=0;}break;}
+            case VK_BKSPACE:{
+                if (p>prompt) {
+                    printf("\b \b");
+                    *--p=0;
+                }
+                break;
+            }
             default:{if (t>=32 && t<127 && p<prompt+sizeof(prompt)-1) {*(p++)=(CHAR)t;putchar(t);}break;}
         }
     }
@@ -190,13 +197,27 @@ done:
     return rc ? rc : exit_code;
 }
 DWORD errno=0;
-DWORD execute(PSTR p) {
+DWORD is_exit=0;
+static DWORD execute_command(PSTR p) {
     if (!p)return -1;
     if (!strcmp(p,"pwd")) { printf("%s\n",cwd); return 0; }
     if (!strcmp(p,"echo")) { printf("%s\n",pmt_p); return 0; }
     if (!strcmp(p,"cd"))return change_directory();
     if (!strcmp(p,"path"))return set_path();
+    if (!strcmp(p,"exit")) { is_exit=1; return 0; }
     return *p ? run_program(p) : 0;
+}
+DWORD execute(PSTR p) {
+    if (!p)return -1;
+    if (!*p)return 0;
+    DWORD started=time_now_ms();
+    DWORD result=execute_command(p);
+    DWORD elapsed=time_elapsed_ms(started);
+    DWORD x,y;
+    stdio_get_cursor(&x,&y);
+    if (x)putchar('\n');
+    printf("Time: %u ms\n",elapsed);
+    return result;
 }
 int main(void) {
     strcpy(cwd,"/BIN");
@@ -213,6 +234,7 @@ int main(void) {
         if (*pmt_p)*pmt_p++=0;
         errno=execute((PSTR)command);
         if (errno)printf("%d\n",errno);
+        if (is_exit)break;
     }
     return 0;
 }

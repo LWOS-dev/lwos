@@ -229,6 +229,13 @@ GHOST 链接 APP 库的 `gui.o` 及现有 gfx/mem/convert 依赖。
 
 ## 毫秒 sleep
 
+`time.h` 提供 `time_now_ms()` 和 `time_elapsed_ms(started)`，基于已有的
+PIT/resman uptime，分辨率约 1 ms，无需 RTC。调用前需绑定 resman ABI。
+这是经过时间，包含调度、睡眠和 I/O 等待，并非进程 CPU 时间或日历时间；
+使用无符号减法支持计数器回绕，单次测量须短于约 49.7 天。
+CCP 对每条非空命令输出 `Time: N ms`，包含内置命令或外部程序的加载、
+执行及清理，失败也输出耗时，不计输入时间。短命令可能显示 `0 ms`。
+
 初始化 `rm_base = env->rm` 后直接调用，无需链接额外库：
 
 ```c

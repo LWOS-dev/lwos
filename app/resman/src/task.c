@@ -2,6 +2,7 @@
 #include "../include/resman.h"
 #include "../include/keyboard.h"
 #include "../include/pit.h"
+#include "../include/net.h"
 
 #include "abi.h"
 
@@ -348,7 +349,7 @@ static void task_unlock(DWORD flags) {
  * wrap as long as each requested sleep is shorter than half the tick range.
  */
 int task_timer_tick(DWORD now) {
-    int woke=0;
+    int woke=resman_net_timer_tick(now);
     for (DWORD id=0;id<TASK_MAX;id++) {
         if (task[id].state==TASK_WAITING && runtime[id].wait_reason==TASK_WAIT_TIMER &&
             (int)(now-task[id].wake_tick)>=0) {
@@ -392,6 +393,7 @@ int resman_task_exit(int exit_code) {
     current_task->exit_code=exit_code;
     current_task->state=TASK_DEAD;
     resman_keyboard_task_gone(current_task->id);
+    resman_net_task_gone(current_task->id);
     task_schedule();
     /* A DEAD task is never selected again; idle remains available. */
     for (;;)asm volatile("cli; hlt" ::: "memory");
@@ -411,6 +413,7 @@ int resman_task_kill(DWORD id) {
     tk->state=TASK_DEAD;
     resman_text_task_gone(id);
     resman_keyboard_task_gone(id);
+    resman_net_task_gone(id);
     rc=RM_OK;
 done:
     task_unlock(flags);

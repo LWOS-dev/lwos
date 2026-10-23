@@ -44,6 +44,36 @@ int hex_parse_w(PPCSTR p, PQWORD out) {
     *out=v;
     return 1;
 }
+int num_parse_w(PCSTR text, PQWORD out) {
+    if (!text || !out)return 0;
+    PCSTR start=text,end;
+    skip_ws(&start);
+    for (end=start;*end;end++);
+    while (end>start && (end[-1]==' ' || end[-1]=='\t'))end--;
+    int hexadecimal=end>start && (end[-1]=='h' || end[-1]=='H');
+    if (hexadecimal)end--;
+    if (end==start)return 0;
+    QWORD value=0;
+    for (PCSTR p=start;p<end;p++) {
+        unsigned digit=hex_digit(*p);
+        if (hexadecimal) {
+            if (digit>15 || value>0x0fffffffffffffffULL)return 0;
+            value=(value<<4)|digit;
+        } else {
+            if (digit>9 || value>1844674407370955161ULL ||
+                (value==1844674407370955161ULL && digit>5))return 0;
+            value=value*10+digit;
+        }
+    }
+    *out=value;
+    return 1;
+}
+int num_parse(PCSTR text, PDWORD out) {
+    QWORD value;
+    if (!out || !num_parse_w(text,&value) || value>0xffffffffULL)return 0;
+    *out=(DWORD)value;
+    return 1;
+}
 void hex_xlat(QWORD in, PSTR out, int digits) {
     int i=0;
     for (; i<digits; i++) {
