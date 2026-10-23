@@ -54,8 +54,29 @@ static void print_hex(DWORD value, int x, int y)
         putxyc(digits[(value >> ((7 - i) * 4)) & 0xf], x + i, y);
 }
 
+volatile DWORD pic_spurious7, pic_spurious15;
+
+/* IRQ7/15 can be delivered with no corresponding in-service bit, even
+ * while masked. They are PIC spurious interrupts, not fatal exceptions.
+ * Do not acknowledge a nonexistent request on the originating PIC. For
+ * slave spurious IRQ15, only the master's cascade IRQ2 needs a specific EOI.
+ */
+static int pic_spurious(DWORD vector)
+{
+    if (vector!=0x27 && vector!=0x2f)return 0;
+    WORD command=vector==0x27 ? 0x20 : 0xa0;
+    outb(command,0x0b); /* select ISR */
+    BYTE in_service=inb(command);
+    outb(command,0x0a); /* restore IRR selection */
+    if (in_service&0x80)return 0;
+    if (vector==0x27)pic_spurious7++;
+    else {pic_spurious15++;outb(0x20,0x62);}
+    return 1;
+}
+
 void resman_isr_dispatch(PISR_FRAME frame)
 {
+    if (pic_spurious(frame->vector))return;
     if (frame->vector < 256 && handlers[frame->vector]) {
         handlers[frame->vector](frame);
         return;

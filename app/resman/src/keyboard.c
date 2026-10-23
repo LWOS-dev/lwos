@@ -11,6 +11,9 @@ static volatile DWORD head, tail;
 volatile DWORD kb_irq_cnt;
 volatile BYTE kb_last_sc;
 volatile DWORD kb_dropped;
+volatile DWORD kb_recovered;
+static int keyboard_ready;
+static void controller_receive(int recovery);
 
 DWORD keyboard_owner=0;
 static int input_enabled, moved;
@@ -51,7 +54,7 @@ static void mouse_receive(void)
 static void mouse_irq(PISR_FRAME frame)
 {
     (void)frame;
-    mouse_receive();
+    controller_receive(0);
     lw_outb(0xa0,0x20);
     lw_outb(0x20,0x20);
 }
@@ -81,19 +84,41 @@ static void enqueue(BYTE scan)
     task_wake_locked(keyboard_owner,TASK_WAIT_KEYBOARD);
 }
 
+/* Both devices share port 0x60. Drain by the status source bit, rather
+ * than assuming that the interrupt vector identifies the next queued byte.
+ * Bounded work keeps a noisy controller from starving IRQ0/the scheduler.
+ * All callers have IF=0; keyboard command transactions also mask IRQs,
+ * so the PIT fallback cannot steal their replies.
+ */
+static void controller_receive(int recovery)
+{
+    for (unsigned i=0; i<32; i++) {
+        BYTE status=lw_inb(0x64);
+        if (!(status&1))break;
+        if ((status&0x20) && input_enabled) {
+            mouse_receive(); /* also resets partial packets on bad AUX data */
+            continue;
+        }
+        BYTE data=lw_inb(0x60);
+        if (status&0x20)continue; /* drain inactive AUX, never decode as keys */
+        if (status&0xc0)continue;
+        kb_last_sc=data;
+        if (recovery)kb_recovered++;
+        else kb_irq_cnt++;
+        enqueue(data);
+    }
+}
+
+void resman_keyboard_poll(void)
+{
+    /* PIT may be running before the keyboard's source is installed. */
+    if (keyboard_ready)controller_receive(1);
+}
+
 void kb_irq(PISR_FRAME frame)
 {
     (void)frame;
-    BYTE status=lw_inb(0x64);
-    if ((status&0x21)==0x01) {
-        BYTE scan=lw_inb(0x60);
-        if (!(status&0xc0)) {
-            kb_last_sc=scan;
-            kb_irq_cnt++;
-            enqueue(scan);
-        }
-    }
-    if (input_enabled) mouse_receive();
+    controller_receive(0);
     lw_outb(0x20,0x20);
 }
 
@@ -170,12 +195,13 @@ int resman_keyboard_init(void) // 初始化键盘 IRQ1
         return -1;
     }
     head=tail=0;
-    kb_irq_cnt=kb_dropped=0;
+    kb_irq_cnt=kb_dropped=kb_recovered=0;
     kb_last_sc=0;
     if (resman_isr_set_handler(0x21,kb_irq) || lw_kbd_bind_source(&source)) {
         unlock(flags);
         return -1;
     }
+    keyboard_ready=1;
     pic_irq_set(1,1);
     unlock(flags);
     return 0;

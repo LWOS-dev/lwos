@@ -9,6 +9,9 @@ int resman_getmpos(RM_MOUSE_POS *pos);
 extern volatile DWORD kb_irq_cnt;
 extern volatile BYTE kb_last_sc;
 extern volatile DWORD kb_dropped;
+extern volatile DWORD kb_recovered;
+/* Bounded lost-interrupt recovery; caller must hold IF=0. */
+void resman_keyboard_poll(void);
 int resman_keyboard_init(void);
 void kb_irq(PISR_FRAME frame);
 int resman_keyboard_set_owner(DWORD id);

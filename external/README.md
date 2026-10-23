@@ -330,3 +330,21 @@ CRT 启动时绑定 `env->vi.txt`，每个 EXE 自己的 BSS 保存 stdout、光
 验证：`make test-stdio` 检查格式化、截断、控制字符、滚屏与独立状态（ASan/UBSan）；
 `python3 tests/stdio_test.py` 在 QEMU PC/Q35 启动两份 TEXTDEMO 及 HELLO，
 检查真实 32 位变参、独立输出/光标、CRT 返回值和任务回收。
+
+
+## PS/2 闲置输入恢复
+
+resman 的 IRQ1/IRQ12 按控制器状态位分流读取键盘和鼠标数据，单次处理有上限。
+PIT 每 10 tick（约 10 ms）检查遗留数据，使用原有输入队列唤醒所属任务，
+避免通知丢失后只能等待下一次硬件中断。命令事务关闭中断，ACK 不会被兜底检查抢走。
+`kb_recovered` 记录兜底读取的键盘字节数。
+
+IRQ7/IRQ15 先检查 PIC 的 in-service 位，伪中断直接返回；伪 IRQ15 只确认主片的
+级联 IRQ2，不再进入未处理中断的停机路径。真实请求仍交给原处理函数。
+`pic_spurious7`、`pic_spurious15` 记录次数。PIC 的 ISR 判定可参照
+[Linux i8259 实现](https://github.com/torvalds/linux/blob/master/arch/x86/kernel/i8259.c)。
+
+`python3 tests/input_recovery_test.py` 在 QEMU PC/Q35 注入伪中断，检查混合/错误字节、
+有界读取、屏蔽 IRQ1 后的空闲唤醒，以及 tick 回绕。
+`python3 tests/ghost_idle_test.py` 运行实际 GHOST，75 秒不输入后检查 PS/2 鼠标、
+Esc 返回 monitor 和 PIT 进度。模拟器通过不能替代真机复测，尤其不能据此断定真机故障来源。

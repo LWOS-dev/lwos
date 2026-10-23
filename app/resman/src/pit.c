@@ -3,6 +3,7 @@
 #include "../include/resman.h"
 #include "../include/pit.h"
 #include "../include/task.h"
+#include "../include/keyboard.h"
 
 static int pit_set_divisor(BYTE channel, DWORD divisor) {
     if ((channel!=PIT_CH0 && channel!=PIT_CH2) || divisor<2 || divisor>65536)
@@ -50,7 +51,12 @@ void timer_irq(PISR_FRAME frame) {
     if (current_task)current_task->run_ticks++;
     int woke=task_timer_tick(timer_ticks);
     int preempt=++quantum_ticks>=10;
-    if (preempt)quantum_ticks=0;
+    if (preempt) {
+        quantum_ticks=0;
+        /* Recover pending controller data even if IRQ1/IRQ12 was lost.
+         * Run before scheduling so newly woken input owners can run now. */
+        resman_keyboard_poll();
+    }
     /* EOI before switching, so the next task can receive IRQ0. Wake sleepers
      * at the 1 ms timer rate, while ordinary preemption stays around 10 ms.
      */
