@@ -1,8 +1,9 @@
 #include "stdio.h"
 
-int main(void) {
+int main(int argn, char** argv) {
     printf("Hello, world!\n");
-    printf("signed=%d unsigned=%u hex=%08x\n", -123, 123u, 0x1234u);
-    puts("Each program has its own stdout and cursor.");
+    for (int i=0; i<argn; i++) {
+        printf("ARG[%d]=\"%s\"\n",i,argv[i]);
+    }
     return 0;
 }

@@ -59,7 +59,7 @@ int main(void) {
 
     WORD cells[2002],other[32];blank(cells,2002);blank(other,32);
     cells[2000]=0x1234;cells[2001]=0x5678;
-    LW_BUF_TXT txt={80,25,cells},txt2={8,4,other};
+    LW_BUF_TXT txt={80,25,cells,0},txt2={8,4,other,0};
     LW_ENV env=environment(&txt,11),env2=environment(&txt2,12);
     assert(stdio_init(&env)==RM_OK && second_stdio_init(&env2)==RM_OK);
     assert(printf("first")==5 && second_printf("AB\nC")==4);
@@ -73,6 +73,13 @@ int main(void) {
     assert(printf("a\tb\rZ\n")==6);
     assert(cells[0]==0x1e5a && cells[8]==0x1e62);
     stdio_get_cursor(&x,&y);assert(x==0 && y==1);
+    /* A foreground child joins this same terminal, then returns to the parent. */
+    assert(second_stdio_init(&env)==RM_OK);
+    assert(second_printf("child\n")==6);
+    stdio_get_cursor(&x,&y);assert(x==0 && y==2);
+    assert(printf("parent")==6);
+    assert((cells[80]&255)=='c' && (cells[160]&255)=='p');
+    second_stdio_get_cursor(&x,&y);assert(x==6 && y==2);
     char long_text[1401];for (int i=0;i<1400;i++)long_text[i]='q';long_text[1400]=0;
     stdio_set_cursor(0,0);assert(printf("%s",long_text)==1400);
     stdio_get_cursor(&x,&y);assert(x==40 && y==17);
@@ -80,7 +87,7 @@ int main(void) {
     assert(puts("ok")==3);
 
     WORD small[10];blank(small,10);small[8]=0xbeef;
-    LW_BUF_TXT tiny={4,2,small};LW_ENV tiny_env=environment(&tiny,13);
+    LW_BUF_TXT tiny={4,2,small,0};LW_ENV tiny_env=environment(&tiny,13);
     assert(stdio_init(&tiny_env)==RM_OK);
     assert(printf("abcdefgh")==8);
     for (int i=0;i<4;i++)assert(small[i]==(0x0700|('e'+i)) && small[i+4]==0x0720);

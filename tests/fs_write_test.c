@@ -124,6 +124,33 @@ int main(void) {
     CHECK(fs_file_write(&f,data,30,&n)==0 && n==30 && f.length==700);
     CHECK(disk[4][500]==data[0] && disk[8][0]==data[12] && get32(disk[1]+16)==0);
     CHECK(fs_file_close(&f)==0);
-    printf("PASS: file write overwrite, append, reopen, disk full, data/metadata/flush failures\n");
+    fixture(&fs); CHECK(dir_create_entry(&fs,2,"TRUNC   TXT",&e,&pos)==0);
+    CHECK(fs_file_open(&fs,"/TRUNC.TXT",&f)==0);
+    CHECK(fs_file_write(&f,data,1200,&n)==0 && n==1200);
+    DWORD old=f.first_cluster;
+    CHECK(fs_file_truncate(&f)==0 && !f.length && !f.position && !f.first_cluster);
+    CHECK(get32(disk[1]+old*4)==0 && get32(disk[2]+old*4)==0);
+    CHECK(fs_file_write(&f,"short\n",6,&n)==0 && n==6);
+    CHECK(fs_file_close(&f)==0 && fs_file_open(&fs,"/TRUNC.TXT",&f)==0);
+    CHECK(f.length==6 && fs_file_read(&f,out,1200,&n)==0 && n==6);
+    CHECK(fs_file_truncate(&f)==0 && fs_file_truncate(&f)==0);
+    f.attr|=1;CHECK(fs_file_truncate(&f)==FS_ERR_READ_ONLY);
+    CHECK(fs_file_close(&f)==0 && fs_file_truncate(&f)==FS_ERR_BAD_HANDLE);
+
+    fixture(&fs); CHECK(dir_create_entry(&fs,2,"CYCLE   TXT",&e,&pos)==0);
+    fat(3,4);fat(4,3);CHECK(dir_update_entry(&fs,&pos,3,700)==0);
+    CHECK(fs_file_open(&fs,"/CYCLE.TXT",&f)==0);
+    CHECK(fs_file_truncate(&f)==FS_ERR_FORMAT && f.length==700);
+    CHECK(get32(disk[1]+12)==4 && get32(disk[1]+16)==3);
+    CHECK(fs_file_close(&f)==0);
+
+    fixture(&fs); CHECK(dir_create_entry(&fs,2,"FAILTR  TXT",&e,&pos)==0);
+    CHECK(fs_file_open(&fs,"/FAILTR.TXT",&f)==0);
+    CHECK(fs_file_write(&f,data,700,&n)==0);
+    old=f.first_cluster;fail_at=writes+1;
+    CHECK(fs_file_truncate(&f)==FS_ERR_IO && f.write_failed && f.length==700);
+    CHECK(get32(disk[1]+old*4)!=0);
+    CHECK(fs_file_close(&f)==0);
+    printf("PASS: file write, truncate/rewrite, cyclic chain and I/O failure cleanup\n");
     return 0;
 }

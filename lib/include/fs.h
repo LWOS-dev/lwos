@@ -143,6 +143,9 @@ int fs_file_seek(PFS_FILE file, long long offset, int origin);
 
 int fs_file_tell(PFS_FILE file, PDWORD position);
 int fs_file_size(PFS_FILE file, PDWORD length);
+/* Truncate an open writable file to zero. The directory is committed before
+ * releasing the old chain; failures may leave unreferenced clusters. */
+int fs_file_truncate(PFS_FILE file);
 /* 返回 1 表示 EOF, 0 表示尚未到 EOF, 负值表示错误。 */
 int fs_file_eof(PFS_FILE file);
 

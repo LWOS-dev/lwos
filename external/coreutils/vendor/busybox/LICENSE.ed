@@ -1,0 +1,7 @@
+Copyright (c) 2002 by David I. Bell
+Permission is granted to use, distribute, or modify this source,
+provided that this copyright notice remains intact.
+
+This notice is reproduced from the header of BusyBox editors/ed.c.
+Only that source file is vendored here; BusyBox libbb is not linked.
+The required library services are implemented in ../../port/compat.c.

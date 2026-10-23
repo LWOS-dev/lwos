@@ -9,7 +9,7 @@ PCLW_ENV lw_env;
 extern int main(int argc, char **argv);
 __attribute__((section(".text.start")))
 int lwp_main(PCLW_ENV env) {
-    if (!env || env->version!=LW_ENV_VERSION || env->size<sizeof(*env) ||
+    if (!env || env->version!=LW_ENV_VERSION || env->size<LW_ENV_BASE_SIZE ||
         !env->abi || !env->rm)return RM_ERR_ARGUMENT;
     lw_abi_base=env->abi;
     rm_base=env->rm;

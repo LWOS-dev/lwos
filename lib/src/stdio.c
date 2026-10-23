@@ -14,7 +14,7 @@ FILE *stdout=&console;
 int stdio_init(PCLW_ENV env) {
     console=(FILE){0};
     stdout=&console;
-    if (!env || env->version!=LW_ENV_VERSION || env->size<sizeof(*env) ||
+    if (!env || env->version!=LW_ENV_VERSION || env->size<LW_ENV_BASE_SIZE ||
         env->vi.size<sizeof(LW_VI) || env->vi.mode!=LW_VI_TEXT || !env->vi.txt)
         return RM_ERR_ARGUMENT;
     PLW_BUF_TXT text=env->vi.txt;
@@ -24,8 +24,9 @@ int stdio_init(PCLW_ENV env) {
     console.text=text;
     console.window_id=env->vi.window_id;
     console.attr=0x07;
-    console.text = text;
-    text->cursor = 0;
+    if (text->cursor>=text->cols*text->lines)text->cursor=0;
+    console.cursor_x=text->cursor%text->cols;
+    console.cursor_y=text->cursor/text->cols;
     return RM_OK;
 }
 int stdio_set_cursor(DWORD x, DWORD y) {
@@ -36,6 +37,10 @@ int stdio_set_cursor(DWORD x, DWORD y) {
     return RM_OK;
 }
 void stdio_get_cursor(PDWORD x, PDWORD y) {
+    if (console.text) {
+        console.cursor_x=console.text->cursor%console.text->cols;
+        console.cursor_y=console.text->cursor/console.text->cols;
+    }
     if (x)*x=console.cursor_x;
     if (y)*y=console.cursor_y;
 }
@@ -59,6 +64,11 @@ static void raw_char(FILE *stream, BYTE ch) {
 }
 int fputc(int ch, FILE *stream) {
     if (stream!=&console || !stream->text)return EOF;
+    /* Another synchronously called EXE may have advanced this terminal. */
+    DWORD cursor=stream->text->cursor;
+    if (cursor>=stream->text->cols*stream->text->lines)return EOF;
+    stream->cursor_x=cursor%stream->text->cols;
+    stream->cursor_y=cursor/stream->text->cols;
     BYTE c=(BYTE)ch;
     if (c=='\n') {stream->cursor_x=0;stream->cursor_y++;scroll(stream);}
     else if (c=='\r')stream->cursor_x=0;

@@ -5,6 +5,8 @@
 
 RM_IMAGE images[RM_MAX_IMAGES];
 static DWORD text_host_id, next_window_id;
+/* Synchronous calls use their caller's task, including kill/reap lifetime. */
+static DWORD call_task[RM_MAX_IMAGES];
 
 void resman_text_task_gone(DWORD id) {
     if (text_host_id==id)text_host_id=0;
@@ -182,6 +184,7 @@ static int image_handle_valid(PRM_IMAGE img) {
     return 0;
 }
 extern int image_call(DWORD entry, DWORD stack_top, PCLW_ENV env);
+static PRM_IMAGE window_find(DWORD window);
 int resman_image_run(PRM_IMAGE image, PCLW_ENV env, int* exit_code) {
     DWORD stack_base, stack_top;
     int result;
@@ -205,10 +208,17 @@ int resman_image_run(PRM_IMAGE image, PCLW_ENV env, int* exit_code) {
     if (!image_handle_valid(image))return RM_ERR_ARGUMENT;
 
     if (image->state!=RM_IMAGE_LOADED)return RM_ERR_ARGUMENT;
-    if (image->flags & LWP_FLAG_TEXT)return RM_ERR_NOT_IMPLEMENTED;
     if (!image->base || !image->stack || !image->entry)return RM_ERR_ARGUMENT;
     if (env->version != LW_ENV_VERSION || 
-        env->size < sizeof(LW_ENV))return RM_ERR_ARGUMENT;
+        env->size < LW_ENV_BASE_SIZE)return RM_ERR_ARGUMENT;
+    if (image->flags & LWP_FLAG_TEXT) {
+        /* Synchronous children borrow the caller's terminal and task identity.
+         * Their private image buffer never becomes a published host window. */
+        PRM_IMAGE terminal=window_find(env->vi.window_id);
+        if (!current_task || !terminal || terminal->text_task!=current_task->id ||
+            env->vi.size<sizeof(LW_VI) || env->vi.mode!=LW_VI_TEXT ||
+            env->vi.txt!=&terminal->text)return RM_ERR_ARGUMENT;
+    }
     
     stack_base=(DWORD)image->stack;
 
@@ -222,12 +232,26 @@ int resman_image_run(PRM_IMAGE image, PCLW_ENV env, int* exit_code) {
     }
 
     image->state=RM_IMAGE_RUNNING;
+    call_task[image-images]=current_task ? current_task->id : 0;
 
     result=image_call(image->entry,stack_top,env);
 
+    call_task[image-images]=0;
     image->state=RM_IMAGE_LOADED;
     *exit_code=result;
     return RM_OK;
+}
+void resman_image_reap_calls(DWORD task_id) {
+    if (!task_id)return;
+    /* The caller has already verified that this task is DEAD. Nested calls
+     * cannot return, so their stacks and images can now be released. */
+    for (DWORD i=0;i<RM_MAX_IMAGES;i++) {
+        if (call_task[i]==task_id && images[i].state==RM_IMAGE_RUNNING) {
+            call_task[i]=0;
+            images[i].state=RM_IMAGE_LOADED;
+            resman_image_unload(&images[i]);
+        }
+    }
 }
 int resman_image_unload(PRM_IMAGE image) {
     if (!image_handle_valid(image))return RM_ERR_ARGUMENT;

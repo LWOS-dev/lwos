@@ -914,6 +914,35 @@ static int file_write_error(PFS_FILE file, int err) {
     return err;
 }
 
+int fs_file_truncate(PFS_FILE file) {
+    int err=check_file(file);
+    if (err)return err;
+    PFS_VOLUME fs=file->volume;
+    if (file->attr&1)return FS_ERR_READ_ONLY;
+    if (!fs->device->write || !fs->device->flush)return FS_ERR_IO;
+    /* Validate/bound the chain before touching metadata or freeing clusters. */
+    DWORD old=file->first_cluster,current=old;
+    for (DWORD hops=0;current;hops++) {
+        if (hops>=fs->cluster_count)return FS_ERR_FORMAT;
+        DWORD next;
+        int status=next_cluster(fs,current,&next);
+        if (status<0)return status;
+        current=status ? next : 0;
+    }
+    err=dir_update_entry(fs,&file->entry_pos,0,0);
+    if (!err)err=fs_sync(fs);
+    if (err)return file_write_error(file,err);
+    file->first_cluster=file->length=file->position=0;
+    file->current_cluster=file->current_cluster_index=0;
+    file->attr|=0x20;
+    if (old) {
+        err=invalidate_fsinfo(fs);
+        if (!err)err=free_clusters(fs,old);
+    }
+    if (!err)err=fs_sync(fs);
+    return file_write_error(file,err);
+}
+
 int fs_file_write(PFS_FILE file, PCVOID buffer, DWORD count,
                   PDWORD written_count) {
     if (written_count)*written_count = 0;

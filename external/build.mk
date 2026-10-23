@@ -60,7 +60,6 @@ FSROOT_FILES += $(FSROOT)/APP/CALC.EXE
 FSROOT_FILES += $(FSROOT)/A.EXE
 FSROOT_FILES += $(FSROOT)/B.EXE
 FSROOT_FILES += $(FSROOT)/GHOST.EXE
-FSROOT_FILES += $(FSROOT)/CCP.EXE
 
 $(FSROOT)/GFX/XTAL.EXE: $(BIN_DIR)/external/xtal.exe
 $(FSROOT)/GFX/SHADER.EXE: $(BIN_DIR)/external/shader.exe
@@ -86,7 +85,7 @@ $(FSROOT)/MEMLOOP.EXE: $(BIN_DIR)/external/memloop.exe
 # Programs defining main() get a private CRT/stdout and the TEXT image flag.
 TEXT_PROGRAMS := textdemo hello ccp
 TEXT_ELFS := $(addprefix $(BIN_DIR)/external/,$(addsuffix .elf,$(TEXT_PROGRAMS)))
-$(BIN_DIR)/external/ccp.elf: $(BUILD_DIR)/lib/app/string.o
+$(BIN_DIR)/external/ccp.elf: $(addprefix $(BUILD_DIR)/lib/app/,string.o fs.o mem.o bitmap.o convert.o)
 TEXT_EXES := $(TEXT_ELFS:.elf=.exe)
 $(TEXT_ELFS): $(BIN_DIR)/external/%.elf: $(BUILD_DIR)/external/%.o $(CRT_OBJS) $(STDIO_LIB_OBJS) tools/mkexe/lwp.ld external/build.mk
 	@mkdir -p $(@D)
@@ -102,3 +101,24 @@ $(FSROOT)/TEXTDEMO.EXE: $(BIN_DIR)/external/textdemo.exe
 
 FSROOT_FILES += $(FSROOT)/CCP.EXE
 $(FSROOT)/CCP.EXE: $(BIN_DIR)/external/ccp.exe
+
+include external/coreutils/build.mk
+
+# Host regressions for CCP's explicit-path command execution.
+$(BUILD_DIR)/tests/ccp_command_test: tests/ccp_command_test.c external/ccp.c lib/src/string.c $(wildcard lib/include/*.h)
+	@mkdir -p $(@D)
+	$(TOOL_C) -std=gnu11 -Wall -Wextra -Werror -Wno-pointer-to-int-cast \
+	    -Wno-return-type -fno-builtin -ffunction-sections -fdata-sections $(LIB_INC) \
+	    tests/ccp_command_test.c lib/src/string.c -Wl,--gc-sections -o $@
+
+test-ccp-command: $(BUILD_DIR)/tests/ccp_command_test
+	$<
+# Compatibility with the original combined shell/ls test target.
+test-ccp-ls: test-ccp-command test-ls
+.PHONY: test-ccp-command test-ccp-ls
+
+# Real i386 foreground execution, on disposable PC/Q35 disk copies.
+test-ccp-exec: $(BIN_DIR)/resman.bin $(BIN_DIR)/external/ccp.exe $(BIN_DIR)/external/hello.exe \
+    $(BUILD_DIR)/lib/app/app.o $(COREUTIL_EXES)
+	PYTHONDONTWRITEBYTECODE=1 python3 tests/ccp_exec_test.py
+.PHONY: test-ccp-exec

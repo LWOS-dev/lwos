@@ -114,8 +114,13 @@ typedef struct _LW_ENV {
     int argc;
     char **argv;
     LW_VI vi; // visible
+    CHAR cwd[256]; // optional v1 tail: absolute working directory (empty means /)
 } LW_ENV, *PLW_ENV;
 typedef const LW_ENV *PCLW_ENV;
+#define LW_ENV_BASE_SIZE __builtin_offsetof(LW_ENV,cwd)
+static inline PCSTR lw_env_cwd(PCLW_ENV env) {
+    return env && env->size>=sizeof(LW_ENV) && env->cwd[0] ? env->cwd : "/";
+}
 typedef int (*LWP_ENTRY)(PCLW_ENV env);
 
 typedef struct _RM_IMAGE RM_IMAGE, *PRM_IMAGE;
@@ -147,6 +152,10 @@ int rm_attach(PVOID base);
 #define rm_alloc                RM_CALL(LW_RM_SLOT_ALLOC,           PVOID (*)(DWORD, DWORD, DWORD))
 #define rm_free                 RM_CALL(LW_RM_SLOT_FREE,            int (*)(PVOID))
 #define rm_image_load           RM_CALL(LW_RM_SLOT_IMAGE_LOAD,      int (*)(PCVOID, DWORD, WORD, PRM_IMAGE *))
+/* Synchronous call on the caller's task, returning the entry's exit code.
+ * TEXT images require env->vi to identify the caller's existing text window;
+ * the window and input queue are borrowed until return. No task is created.
+ * The caller retains image ownership and must unload it after return. */
 #define rm_image_run            RM_CALL(LW_RM_SLOT_IMAGE_RUN,       int (*)(PRM_IMAGE, PCLW_ENV, int *))
 #define rm_image_unload         RM_CALL(LW_RM_SLOT_IMAGE_UNLOAD,    int (*)(PRM_IMAGE))
 #define rm_task_create          RM_CALL(LW_RM_SLOT_TASK_CREATE,     int (*)(PRM_IMAGE, PCLW_ENV, PDWORD))

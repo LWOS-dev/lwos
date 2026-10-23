@@ -60,6 +60,8 @@ int resman_image_load(PCVOID file, DWORD file_size, WORD owner, PRM_IMAGE *out);
 int resman_image_run(PRM_IMAGE image, PCLW_ENV env, int *exit_code);
 int resman_image_unload(PRM_IMAGE image);
 int resman_image_valid(PRM_IMAGE pimg);
+/* Private: release synchronous child images after their caller task dies. */
+void resman_image_reap_calls(DWORD task_id);
 
 void resman_alarm(void);
 void resman_pcspk(int hz);

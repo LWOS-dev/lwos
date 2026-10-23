@@ -7,8 +7,20 @@ extern RM_IMAGE images[RM_MAX_IMAGES];
 TASK task[TASK_MAX];
 PTASK current_task;
 static int wakes;
+static int calls;
+PVOID *lw_abi_base;
+const PVOID lw_rm[LW_RM_SLOT_COUNT]={0};
+int image_call(DWORD entry,DWORD stack_top,PCLW_ENV env) {
+    assert(entry==0x1000 && stack_top==0x4000);
+    assert(env->vi.window_id==71 && env->argc==1);
+    calls++;return 42;
+}
 PVOID memcpy(PVOID dest, PCVOID src, int count) {
     for (int i=0;i<count;i++)((PBYTE)dest)[i]=((PCBYTE)src)[i];
+    return dest;
+}
+PVOID memzero(PVOID dest,int count) {
+    for (int i=0;i<count;i++)((PBYTE)dest)[i]=0;
     return dest;
 }
 void task_wake_locked(DWORD id, DWORD reason) {
@@ -24,6 +36,22 @@ int main(void) {
     PRM_IMAGE img=&images[0];
     img->state=RM_IMAGE_BOUND; img->window_id=71;
     img->text_task=2; img->text.buffer=cells;
+    PRM_IMAGE child=&images[1];
+    child->state=RM_IMAGE_LOADED;child->flags=LWP_FLAG_TEXT;
+    child->base=(PVOID)0x1000;child->entry=0x1000;
+    child->stack=(PVOID)0x2000;child->stack_size=0x2000;
+    LW_ENV env={.version=LW_ENV_VERSION,.size=sizeof(LW_ENV),.argc=1};
+    env.vi=(LW_VI){.size=sizeof(LW_VI),.mode=LW_VI_TEXT,.window_id=71,.txt=&img->text};
+    int code;
+    assert(resman_image_run(child,&env,&code)==RM_ERR_ARGUMENT && !calls);
+    current_task=&task[2];
+    assert(resman_image_run(child,&env,&code)==RM_OK && code==42 && calls==1);
+    assert(child->state==RM_IMAGE_LOADED && img->state==RM_IMAGE_BOUND);
+    env.vi.txt=&child->text;
+    assert(resman_image_run(child,&env,&code)==RM_ERR_ARGUMENT && calls==1);
+    env.vi.txt=&img->text;env.vi.window_id=72;
+    assert(resman_image_run(child,&env,&code)==RM_ERR_ARGUMENT && calls==1);
+    current_task=&task[1];
     /* Defaults are set before task publication; later only the owner may edit. */
     img->state=RM_IMAGE_LOADED;
     assert(resman_image_set_caption(img,"/DIR/APP.EXE")==RM_OK);

@@ -205,7 +205,7 @@ int resman_task_create(PRM_IMAGE image, PCLW_ENV env, PDWORD out_id) {
     if (!image->base || !image->stack || !image->entry)goto done;
     if (env) {
         if (env->version!=LW_ENV_VERSION ||
-            env->size < sizeof(LW_ENV)) {
+            env->size < LW_ENV_BASE_SIZE) {
             goto done;
         }
         if (env->argc!=0 || env->argv!=0) {
@@ -229,7 +229,8 @@ int resman_task_create(PRM_IMAGE image, PCLW_ENV env, PDWORD out_id) {
     rt->image=image;
 
     if (env) {
-        rt->env = *env;
+        memcpy(&rt->env,env,env->size<sizeof(LW_ENV) ? env->size : sizeof(LW_ENV));
+        rt->env.size=sizeof(LW_ENV);
     } else {
         rt->env.version = LW_ENV_VERSION;
         rt->env.size = sizeof(LW_ENV);
@@ -434,6 +435,7 @@ int resman_task_reap(DWORD id, int *exit_code) {
     }
     PRM_IMAGE image=runtime[id].image;
     if (!resman_image_valid(image) || image->state!=RM_IMAGE_BOUND)goto done;
+    resman_image_reap_calls(id);
     image->state=RM_IMAGE_LOADED;
     rc=resman_image_unload(image);
     if (rc) {
