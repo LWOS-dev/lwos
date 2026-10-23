@@ -1,4 +1,5 @@
-nop
-db feh
-dw aa55h
-dd e1eccafeh
+org     0
+label   start
+dw      ffffh
+jmps    start
+jmps    feh

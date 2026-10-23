@@ -129,3 +129,14 @@ test-ccp-exec: $(BIN_DIR)/resman.bin $(BIN_DIR)/external/ccp.exe $(BIN_DIR)/exte
     $(BUILD_DIR)/lib/app/app.o $(COREUTIL_EXES)
 	PYTHONDONTWRITEBYTECODE=1 python3 tests/ccp_exec_test.py
 .PHONY: test-ccp-exec
+
+$(BUILD_DIR)/tests/lasm_test: tests/lasm_test.c external/lasm.c lib/src/string.c lib/src/convert.c lib/src/mem.c $(wildcard lib/include/*.h)
+	@mkdir -p $(@D)
+	$(TOOL_C) -std=gnu11 -fno-builtin -ffunction-sections -fdata-sections \
+	    -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast $(LIB_INC) \
+	    tests/lasm_test.c lib/src/string.c lib/src/convert.c lib/src/mem.c \
+	    -Wl,--gc-sections -o $@
+
+test-lasm: $(BUILD_DIR)/tests/lasm_test
+	$<
+.PHONY: test-lasm
