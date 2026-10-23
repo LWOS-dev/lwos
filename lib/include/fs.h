@@ -210,6 +210,11 @@ int dir_create_entry(PFS_VOLUME fs, DWORD parent_cluster, PCSTR name83,
  * 成功的新建操作已同步；失败可能保留已创建的父目录，不保证原子回滚。
  */
 int fs_touch(PFS_VOLUME fs, PCSTR path);
+/* 删除短名文件或递归删除目录（SPC=1），拒绝根目录及只读项。
+ * 调用方保证没有打开的关联句柄；成功已同步，失败可能已删除部分内容。
+ * 最多支持 64 层目录，不支持带 LFN 项的目录。
+ */
+int fs_remove(PFS_VOLUME fs, PCSTR path);
 
 
 #endif

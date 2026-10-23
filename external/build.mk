@@ -4,7 +4,7 @@ EXTERNAL_NAMES = hello textdemo memtest memloop a b exit ghost reddot \
 				 xtal \
 				 calc \
 				 ccp \
-				 lasm
+				 smce
 EXTERNAL_EXES = $(addprefix $(BIN_DIR)/external/,$(addsuffix .exe,$(EXTERNAL_NAMES)))
 EXTERNAL_CFLAGS = $(CFLAGS_APP) -nostdinc -fno-pic \
     -fno-asynchronous-unwind-tables -fno-unwind-tables -Werror
@@ -84,7 +84,7 @@ $(FSROOT)/MEMTEST.EXE: $(BIN_DIR)/external/memtest.exe
 $(FSROOT)/MEMLOOP.EXE: $(BIN_DIR)/external/memloop.exe
 
 # Programs defining main() get a private CRT/stdout and the TEXT image flag.
-TEXT_PROGRAMS := textdemo hello ccp lasm
+TEXT_PROGRAMS := textdemo hello ccp smce
 TEXT_ELFS := $(addprefix $(BIN_DIR)/external/,$(addsuffix .elf,$(TEXT_PROGRAMS)))
 $(BIN_DIR)/external/ccp.elf: $(addprefix $(BUILD_DIR)/lib/app/,string.o fs.o mem.o bitmap.o convert.o)
 TEXT_EXES := $(TEXT_ELFS:.elf=.exe)
@@ -95,7 +95,7 @@ $(TEXT_EXES): $(BIN_DIR)/external/%.exe: $(BIN_DIR)/external/%.elf $(EXTERNAL_MK
 	$(EXTERNAL_MKEXE) --text $< $@
 
 
-$(BIN_DIR)/external/lasm.elf: $(addprefix $(BUILD_DIR)/lib/app/,string.o fs.o mem.o bitmap.o convert.o)
+$(BIN_DIR)/external/smce.elf: $(addprefix $(BUILD_DIR)/lib/app/,string.o fs.o mem.o bitmap.o convert.o)
 
 FSROOT_FILES += $(FSROOT)/HELLO.EXE
 $(FSROOT)/HELLO.EXE: $(BIN_DIR)/external/hello.exe
@@ -106,8 +106,8 @@ $(FSROOT)/TEXTDEMO.EXE: $(BIN_DIR)/external/textdemo.exe
 FSROOT_FILES += $(FSROOT)/CCP.EXE
 $(FSROOT)/CCP.EXE: $(BIN_DIR)/external/ccp.exe
 
-FSROOT_FILES += $(FSROOT)/BIN/LASM.EXE
-$(FSROOT)/BIN/LASM.EXE: $(BIN_DIR)/external/lasm.exe
+FSROOT_FILES += $(FSROOT)/BIN/SMCE.EXE
+$(FSROOT)/BIN/SMCE.EXE: $(BIN_DIR)/external/smce.exe
 
 include external/coreutils/build.mk
 
@@ -130,13 +130,23 @@ test-ccp-exec: $(BIN_DIR)/resman.bin $(BIN_DIR)/external/ccp.exe $(BIN_DIR)/exte
 	PYTHONDONTWRITEBYTECODE=1 python3 tests/ccp_exec_test.py
 .PHONY: test-ccp-exec
 
-$(BUILD_DIR)/tests/lasm_test: tests/lasm_test.c external/lasm.c lib/src/string.c lib/src/convert.c lib/src/mem.c $(wildcard lib/include/*.h)
+$(BUILD_DIR)/tests/smce_test: tests/smce_test.c external/smce.c lib/src/string.c lib/src/convert.c lib/src/mem.c $(wildcard lib/include/*.h)
 	@mkdir -p $(@D)
 	$(TOOL_C) -std=gnu11 -fno-builtin -ffunction-sections -fdata-sections \
 	    -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast $(LIB_INC) \
-	    tests/lasm_test.c lib/src/string.c lib/src/convert.c lib/src/mem.c \
+	    tests/smce_test.c lib/src/string.c lib/src/convert.c lib/src/mem.c \
 	    -Wl,--gc-sections -o $@
 
-test-lasm: $(BUILD_DIR)/tests/lasm_test
-	$<
-.PHONY: test-lasm
+$(BUILD_DIR)/tests/smce_file_test: tests/smce_file_test.c tests/fs_dir_test.c external/smce.c \
+    lib/src/fs.c lib/src/string.c lib/src/convert.c lib/src/mem.c $(wildcard lib/include/*.h)
+	@mkdir -p $(@D)
+	$(TOOL_C) -std=gnu11 -fno-builtin -ffunction-sections -fdata-sections \
+	    -Wno-pointer-to-int-cast -Wno-int-to-pointer-cast $(LIB_INC) \
+	    tests/smce_file_test.c lib/src/fs.c lib/src/string.c lib/src/convert.c lib/src/mem.c \
+	    -Wl,--gc-sections -o $@
+
+test-smce: $(BUILD_DIR)/tests/smce_test $(BUILD_DIR)/tests/smce_file_test
+	$(BUILD_DIR)/tests/smce_test
+	$(BUILD_DIR)/tests/smce_file_test
+	python3 -B tests/smce_encoding_test.py
+.PHONY: test-smce

@@ -1,0 +1,32 @@
+SMCE - Symbolic Machine Code Editor
+
+Machine-code readability tool, not a compiler for large builds.
+Usage: smce /RES/a.s -o /RES/a.bin
+
+AT&T subset, 32-bit x86:
+  # comment                 (semicolon comments also accepted)
+  name:                     case-sensitive label, may prefix an instruction
+  .org 16                   advance output offset, filling with zero bytes
+  .byte 1, 2, 0xff           1-byte data (up to 8 values per line)
+  .word 0x1234              2-byte data
+  .long name                4-byte data or label address
+  nop
+  jmp name                  fixed E9 rel32, no short-jump relaxation
+
+MOV source, destination:
+  movb $1, %al
+  movw $-1, %cx
+  movl $0x12345678, %eax
+  movl %eax, %ebx
+  movl %eax, -4(%ebp)
+  movl 8(%ebx,%ecx,4), %edx
+  movl $name, %esi
+
+%register, $immediate, bare address = memory.
+b/w/l selects 8/16/32 bits; plain mov infers width from a register.
+Memory uses disp(base,index,scale), with 32-bit address registers.
+Scale is 1/2/4/8; %esp cannot be an index. No memory-to-memory MOV.
+Numbers: decimal, 0x hex, leading-0 octal, optional + or -.
+Values may be single labels; expressions/relocations are not implemented.
+Symbolic memory displacements always use 32 bits in both passes.
+Output is raw bytes, not an ELF or LWP executable.

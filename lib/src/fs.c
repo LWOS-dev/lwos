@@ -908,6 +908,107 @@ int fs_touch(PFS_VOLUME fs, PCSTR path) {
     }
 }
 
+/* 先检查完整簇链，避免损坏/循环的链导致释放过程无限运行。 */
+static int remove_entry(PFS_VOLUME fs, const SFT_T *entry,
+                        const FEP_T *pos, DWORD *ancestors, unsigned depth) {
+    if (entry->attr & 1)return FS_ERR_READ_ONLY;
+    if (entry->cluster == fs->root_cluster)return FS_ERR_ARGUMENT;
+    if (!entry->cluster && (entry->length || (entry->attr & 0x10)))
+        return FS_ERR_FORMAT;
+    DWORD c=entry->cluster;
+    for (DWORD hops=0;c;hops++) {
+        if (hops>=fs->cluster_count)return FS_ERR_FORMAT;
+        if (c==fs->root_cluster)return FS_ERR_FORMAT;
+        for (unsigned i=0;i<depth;i++)
+            if (c==ancestors[i])return FS_ERR_FORMAT;
+        DWORD next;
+        int status=next_cluster(fs,c,&next);
+        if (status<0)return status;
+        c=status ? next : 0;
+    }
+    if (entry->attr & 0x10) {
+        if (depth>=64)return FS_ERR_RANGE;
+        ancestors[depth]=entry->cluster;
+        c=entry->cluster;
+        int ended=0;
+        for (DWORD hops=0;!ended && hops<fs->cluster_count;hops++) {
+            for (int i=0;i<16;i++) {
+                SFT_T child;
+                int status=fat_read_fte(fs,c,i,&child);
+                if (status<0)return status;
+                if (status==FS_ENTRY_END) {ended=1;break;}
+                /* Reject LFN entries rather than leave orphan names behind. */
+                PCBYTE raw=fs->buffer+i*32;
+                if (raw[0]!=0xe5 && (raw[11]&0x0f)==0x0f)
+                    return FS_ERR_ARGUMENT;
+                if (status!=FS_ENTRY_VALID)continue;
+                if (!strncmp(child.name,".          ",11) ||
+                    !strncmp(child.name,"..         ",11))continue;
+                FEP_T child_pos={.lba=cluster_to_lba(fs,c),.pos=(WORD)(i*32)};
+                int err=remove_entry(fs,&child,&child_pos,ancestors,depth+1);
+                if (err)return err;
+            }
+            if (!ended) {
+                int status=next_cluster(fs,c,&c);
+                if (status<0)return status;
+                if (!status)ended=1;
+            }
+        }
+        if (!ended)return FS_ERR_FORMAT;
+    }
+    int err=dir_read_slot(fs,pos);
+    if (err)return err;
+    fs->buffer[pos->pos]=0xe5;
+    err=write_sector(fs,pos->lba);
+    /* Unpublish and flush before releasing data referenced by the entry. */
+    if (!err)err=fs_sync(fs);
+    if (!err && entry->cluster)err=invalidate_fsinfo(fs);
+    if (!err && entry->cluster)err=free_clusters(fs,entry->cluster);
+    if (!err)err=fs_sync(fs);
+    return err;
+}
+
+int fs_remove(PFS_VOLUME fs, PCSTR path) {
+    int err=dir_write_ready(fs);
+    if (err)return err;
+    if (!path || !*path)return FS_ERR_ARGUMENT;
+    if (!fs->device->flush)return FS_ERR_IO;
+    SFT_T entry;
+    FEP_T pos;
+    err=lookup_impl(fs,path,&entry,&pos,FS_ERR_NOT_FOUND);
+    if (err)return err;
+    /* Verify the parent has no LFN slots, including across cluster borders. */
+    const char *start=path;
+    skip_ws(&start);
+    const char *end=start+strlen(start);
+    while (end>start && end[-1]=='/')end--;
+    while (end>start && end[-1]!='/')end--;
+    char parent[256];
+    unsigned n=(unsigned)(end-start);
+    if (n>=sizeof(parent))return FS_ERR_RANGE;
+    memcpy(parent,start,n);parent[n]=0;
+    SFT_T directory;
+    err=fs_lookup(fs,n ? parent : "/",&directory);
+    if (err)return err;
+    DWORD c=directory.cluster;
+    for (DWORD hops=0;hops<fs->cluster_count;hops++) {
+        err=read_sector(fs,cluster_to_lba(fs,c));
+        if (err)return err;
+        for (int i=0;i<16;i++) {
+            PCBYTE raw=fs->buffer+i*32;
+            if (!raw[0])goto checked;
+            if (raw[0]!=0xe5 && (raw[11]&0x0f)==0x0f)return FS_ERR_ARGUMENT;
+        }
+        int status=next_cluster(fs,c,&c);
+        if (status<0)return status;
+        if (!status)goto checked;
+    }
+    return FS_ERR_FORMAT;
+checked:;
+    DWORD ancestors[64];
+    return remove_entry(fs,&entry,&pos,ancestors,0);
+}
+
 /* I/O 失败后禁止继续使用旧缓存；关闭、检查卷并重新打开。 */
 static int file_write_error(PFS_FILE file, int err) {
     if (err == FS_ERR_IO)file->write_failed = 1;

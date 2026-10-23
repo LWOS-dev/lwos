@@ -137,6 +137,55 @@ int main(void) {
     CHECK(disk[3][0]==0 && get32(disk[1]+12)==0);
     fixture(&fs); flush_fail=1;
     CHECK(fs_touch(&fs,"/PARENT/FILE.TXT")==FS_ERR_IO && disk[3][0]==0);
-    printf("PASS: directory mutations, recursive touch, FAT copies and I/O errors\n");
+    fixture(&fs);
+    CHECK(fs_touch(&fs,"/WORK/LOG/NEW.TXT")==0);
+    CHECK(fs_file_open(&fs,"/WORK/LOG/NEW.TXT",&file)==0);
+    CHECK(fs_file_write(&file,"hello",5,&n)==0);
+    CHECK(fs_file_close(&file)==0);
+    CHECK(fs_remove(&fs,"/")==FS_ERR_ARGUMENT);
+    CHECK(fs_remove(&fs,"/WORK/../LOG")==FS_PATH_ERROR);
+    CHECK(fs_remove(&fs,"/MISSING")==FS_ERR_NOT_FOUND);
+    CHECK(fs_remove(&fs,"/WORK")==0);
+    CHECK(disk[3][0]==0xe5);
+    for (DWORD c=3;c<=5;c++) {
+        CHECK(get32(disk[1]+c*4)==0 && get32(disk[2]+c*4)==0);
+    }
+    CHECK(fs_touch(&fs,"/EMPTY.TXT")==0);
+    CHECK(fs_remove(&fs,"/EMPTY.TXT")==0);
+    CHECK(fs_touch(&fs,"/DIR/FILE")==0);
+    CHECK(fs_remove(&fs,"/DIR/FILE")==0);
+    CHECK(fs_remove(&fs,"/DIR/")==0); /* Empty directory with dot entries. */
+    fixture(&fs);
+    CHECK(fs_touch(&fs,"/DATA")==0);
+    disk[3][11]|=1;
+    CHECK(fs_remove(&fs,"/DATA")==FS_ERR_READ_ONLY && disk[3][0]=='D');
+    disk[3][11]&=~1;
+    fail_at=writes+1;
+    CHECK(fs_remove(&fs,"/DATA")==FS_ERR_IO && disk[3][0]=='D');
+    fail_at=0;flush_fail=1;
+    CHECK(fs_remove(&fs,"/DATA")==FS_ERR_IO);
+    fixture(&fs);
+    CHECK(fs_touch(&fs,"/DIR/FILE")==0);
+    fat(3,3); /* Reject cycles before modifying directory contents. */
+    old_writes=writes;
+    CHECK(fs_remove(&fs,"/DIR")==FS_ERR_FORMAT && writes==old_writes);
+    fixture(&fs);
+    CHECK(fs_touch(&fs,"/DATA")==0);
+    memcpy(disk[3]+32,"LONGNAME   ",11);disk[3][43]=0x0f;
+    CHECK(fs_remove(&fs,"/DATA")==FS_ERR_ARGUMENT && disk[3][0]=='D');
+    fixture(&fs);
+    CHECK(fs_touch(&fs,"/DIR/FILE")==0);
+    /* Directory spans noncontiguous clusters with no end marker in the first. */
+    for (int i=64;i<512;i++)disk[4][i]=0xe5;
+    fat(3,7);fat(7,0xfffffff);
+    memcpy(disk[8],"TAIL    TXT",11);disk[8][11]=0x20;
+    CHECK(fs_remove(&fs,"/DIR")==0);
+    CHECK(disk[8][0]==0xe5 && get32(disk[1]+28)==0);
+    fixture(&fs);
+    CHECK(fs_touch(&fs,"/DIR/FILE")==0);
+    disk[4][75]|=1;
+    CHECK(fs_remove(&fs,"/DIR")==FS_ERR_READ_ONLY);
+    CHECK(disk[3][0]=='D' && disk[4][64]=='F');
+    printf("PASS: directory mutations, recursive touch/remove, FAT copies and I/O errors\n");
     return 0;
 }

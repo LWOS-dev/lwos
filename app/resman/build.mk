@@ -53,3 +53,7 @@ $(BUILD_DIR)/tests/window_event_test: tests/window_event_test.c $(RM_DIR)/src/im
 test-window-event: $(BUILD_DIR)/tests/window_event_test
 	$<
 .PHONY: test-window-event
+
+test-ghost-restart: $(IMG)
+	python3 -B tests/ghost_restart_test.py
+.PHONY: test-ghost-restart

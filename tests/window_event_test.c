@@ -8,6 +8,11 @@ TASK task[TASK_MAX];
 PTASK current_task;
 static int wakes;
 static int calls;
+static DWORD keyboard_owner;
+int resman_keyboard_set_owner(DWORD id) {
+    keyboard_owner=id;
+    return RM_OK;
+}
 PVOID *lw_abi_base;
 const PVOID lw_rm[LW_RM_SLOT_COUNT]={0};
 int image_call(DWORD entry,DWORD stack_top,PCLW_ENV env) {
@@ -33,6 +38,10 @@ int main(void) {
     task[2].id=2; task[2].state=TASK_WAITING;
     current_task=&task[1];
     assert(resman_text_host(1)==RM_OK);
+    assert(keyboard_owner==1);
+    current_task=&task[2];
+    assert(resman_text_host(1)==RM_ERR_NOT_READY && keyboard_owner==1);
+    current_task=&task[1];
     PRM_IMAGE img=&images[0];
     img->state=RM_IMAGE_BOUND; img->window_id=71;
     img->text_task=2; img->text.buffer=cells;
@@ -125,5 +134,7 @@ int main(void) {
     assert(resman_window_poll(72,&out)==1);
     current_task=&task[1]; assert(resman_text_host(0)==RM_OK);
     assert(resman_window_send(72,&in)==RM_ERR_NOT_READY);
+    current_task=&task[2];
+    assert(resman_text_host(1)==RM_OK && keyboard_owner==2);
     return 0;
 }

@@ -2,6 +2,7 @@
 #include "abi.h"
 #include "mem.h"
 #include "../include/task.h"
+#include "../include/keyboard.h"
 
 RM_IMAGE images[RM_MAX_IMAGES];
 static DWORD text_host_id, next_window_id;
@@ -20,8 +21,10 @@ int resman_text_host(int enable) {
     int rc=RM_ERR_NOT_READY;
     if (current_task && current_task->id) {
         if (enable && (!resman_text_available() || text_host_id==current_task->id)) {
-            text_host_id=current_task->id;
-            rc=RM_OK;
+            /* F7 hosts must acquire input just like the boot autoload host.
+             * Keep host publication and ownership in one IRQ-masked section. */
+            rc=resman_keyboard_set_owner(current_task->id);
+            if (rc==RM_OK)text_host_id=current_task->id;
         } else if (!enable && text_host_id==current_task->id) {
             text_host_id=0;
             rc=RM_OK;

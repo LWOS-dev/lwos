@@ -1,6 +1,6 @@
 # 命令行工具
 
-`ls`、`cat`、`xxd`、`netrecv`、`touch`、`sed`、`ed` 及以后新增的 `grep` 等独立文本程序放在这里。
+`ls`、`cat`、`xxd`、`netrecv`、`touch`、`rm`、`sed`、`ed` 及以后新增的 `grep` 等独立文本程序放在这里。
 CCP 只负责内置命令和外部程序启动，不包含这些工具的实现。
 
 每个工具使用 `int main(int argc, char **argv)`，通过 CRT 绑定调用者的终端。
@@ -18,6 +18,7 @@ make test-lwcon      # 宿主发送端丢 ACK/重试/失败回归
 make test-net-init   # 82567LM 寄存器模型：D0/PHY/固件锁/IRQ 失败清理
 make test-netrecv    # 82540EM IRQ + 文件落盘的 PC/Q35 集成测试
 make test-touch      # touch 的宿主测试
+make test-rm         # rm 参数及文件系统删除测试
 make test-ccp-exec   # CCP 调用独立工具的 PC/Q35 集成测试
 ```
 
@@ -224,3 +225,22 @@ ed> q
 
 两者均继承当前目录，沿用 FAT 8.3 路径规则。上游版本、许可和本地修改见
 [vendor/UPSTREAM.md](vendor/UPSTREAM.md)。集成测试运行在临时磁盘副本上，并逐字节校验保存结果。
+
+
+## rm
+
+`rm [--] PATH...` 删除一个或多个文件或目录，目录默认递归删除全部内容，
+不需要 `-r`；不支持其他选项。路径支持绝对路径、相对路径以及 `.` / `..`。
+以 `-` 开头的名字放在 `--` 之后。成功不输出文字，失败报告目标和错误码，
+并继续处理后续目标。
+
+```text
+rm NOTE.TXT
+rm /WORK/OLD A.TXT
+rm -- -OLD.TXT
+```
+
+拒绝删除根目录、当前目录及其父目录，也拒绝只读项。
+沿用 FAT32 的 SPC=1 和 8.3 短文件名限制；目标父目录或待删除目录内存在
+长文件名（LFN）目录项时报错，最多递归 64 层目录。删除会回收数据簇并同步，
+中途失败时可能已有部分内容被删除，不会回滚。

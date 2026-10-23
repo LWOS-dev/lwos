@@ -146,3 +146,9 @@ QEMU 多任务分配、IF 恢复和退出/终止后的回收。
 每轮应取完按键、读取位置，然后调用 `rm_input_wait()`；检查和阻塞在关中断
 区间内完成，避免丢失唤醒。输入仅允许当前键盘所有者读取。
 ghost 退出时关闭鼠标，清空事件，把输入交回 monitor。
+
+从 Monitor 的文件浏览器按 F7 再次启动 Ghost 时，`rm_text_host(1)` 在同一个
+关中断区间内注册宿主并把键盘所有权交给当前任务；Ghost 每次启动都会调用
+`rm_enable_input()`，重新启用退出时关闭的鼠标。该流程不依赖首次自动装载。
+`make test-ghost-restart` 在 QEMU PC/Q35 上各连续检查三次 Esc 退出、F7 重启、
+键盘输入、鼠标移动、PIT 时钟及最终返回 Monitor。

@@ -97,3 +97,12 @@ $(BUILD_DIR)/tests/touch_test: tests/touch_test.c external/coreutils/touch.c $(w
 test-touch: $(BUILD_DIR)/tests/touch_test
 	$<
 .PHONY: test-touch
+
+$(BUILD_DIR)/tests/rm_test: tests/rm_test.c external/coreutils/rm.c $(wildcard lib/include/*.h)
+	@mkdir -p $(@D)
+	$(TOOL_C) -std=gnu11 -Wall -Wextra -Werror -Wno-pointer-to-int-cast \
+	    -fno-builtin $(LIB_INC) $< -o $@
+
+test-rm: $(BUILD_DIR)/tests/rm_test test-fs-dir
+	$<
+.PHONY: test-rm

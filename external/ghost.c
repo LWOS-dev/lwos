@@ -62,6 +62,9 @@ int lwp_main(const LW_ENV *env) {
         gui_close(&display);
         return RM_ERR_NOT_READY;
     }
+    /* Exit disables AUX input; every fresh host must enable it again.
+     * A missing mouse still leaves the host's keyboard usable. */
+    rm_enable_input();
     gui_draw_desktop_c();
     RM_MOUSE_POS pos = {(int)display.width/2, (int)display.height/2};
     mouse_rect.info.x=0,mouse_rect.info.y=0;

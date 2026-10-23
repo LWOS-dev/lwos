@@ -106,6 +106,16 @@ make run    # 构建镜像并用 Bochs 启动
 
 镜像为 MBR + FAT32，构建时使用 512 字节扇区、每簇 1 扇区。`fsroot/` 是镜像暂存目录；`resources/` 的文件递归打包到镜像 `/RES/`。`tools/mkfat` 保留作实验代码，不是当前镜像制作路径。QEMU 也用于仓库的部分测试脚本，但 `make run` 不会自动选择 QEMU。
 
+## SMCE（Symbolic Machine Code Editor）
+
+SMCE 是用于机器码符号化表达和可读性说明的工具，不作为今后大型项目构建使用的编译器。
+命令为 `smce FILE -o OUTPUT`，输出原始机器码。采用 AT&T 语法子集：
+`源, 目标`、`%` 寄存器、`$` 立即数、`movb/movw/movl`、`label:`，
+以及 `.byte/.word/.long/.org`。当前支持 `mov`、`nop` 和固定近跳转 `jmp`。
+例如 `movl $0x12345678, %eax`；语法说明见 `resources/smce.txt`，示例见 `resources/a.s`。
+源码位于 `external/smce.c`，构建产物为 `bin/external/smce.exe`，
+安装到系统镜像的 `/BIN/SMCE.EXE`；`make test-smce` 运行对应回归测试。
+
 ## 许可证
 
 本项目以 **GNU General Public License v3.0**（`GPL-3.0-only`，仅第 3 版）发布，完整条款见 [LICENSE](LICENSE)——该文件是 gnu.org 官方文本的逐字节副本，未做任何改动，版权声明因此写在这里。
